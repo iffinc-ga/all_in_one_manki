@@ -34,25 +34,22 @@
     .stat-value.error{color:#dc3545}.stat-value.success{color:#28a745}
     .stat input{width:100%;padding:6px;border:1px solid #ced4da;border-radius:3px;font-size:16px;font-weight:bold}
     .stat.editable{border-left-color:#007bff}
-
     .table-container{padding:20px;display:none}
-    /* Make header horizontally scrollable and sync with body */
     .table-header-wrapper{background:#343a40;overflow:auto}
     .table-header-wrapper::-webkit-scrollbar{display:none}
     .table-header-wrapper{scrollbar-width:none}
     .table-header{min-width:1200px}
     .table-header table{width:100%;border-collapse:collapse}
-    .table-header th{background:#343a40;color:#fff;padding:12px 8px;text-align:left;font-weight:600;font-size:13px;border:none;white-space:nowrap}
-
+    .table-header th{background:#343a40;color:#fff;padding:12px 8px;text-align:left;font-weight:600;font-size:13px;border:none}
     .table-body-wrapper{max-height:560px;overflow:auto}
     .table-body{min-width:1200px}
     .table-body table{width:100%;border-collapse:collapse}
-    .table-body td{padding:8px;border-bottom:1px solid #dee2e6;background:#fff}
+    .table-body td{padding:10px 8px;border-bottom:1px solid #dee2e6;background:#fff}
     .table-body tr:hover td{background:#f8f9fa}
     .table-body td input{width:100%;padding:6px;border:1px solid #ced4da;border-radius:3px;font-size:13px}
     .table-body td input:focus{outline:none;border-color:#667eea}
     .readonly{background:#e9ecef!important}
-    .actions{text-align:center;white-space:nowrap}
+    .actions{text-align:center}
     .actions button{padding:4px 8px;font-size:12px;margin:0 2px}
     .inline-help{font-size:12px;color:#6c757d;margin-left:8px}
   </style>
@@ -100,21 +97,17 @@
   <div class="table-container" id="tableContainer">
     <div class="table-header-wrapper">
       <div class="table-header">
-        <table>
-          <thead>
-            <tr>
-              <th style="width:48px">Pos</th>
-              <th style="width:210px">Part Number</th>
-              <th style="width:90px">Quantity</th>
-              <th style="width:64px">Unit</th>
-              <th style="width:120px">Unit Price</th>
-              <th style="width:120px">Line Total</th>
-              <th style="width:120px">Net Weight</th>
-              <th style="width:80px">Country</th>
-              <th style="width:140px">Actions</th>
-            </tr>
-          </thead>
-        </table>
+        <table><thead><tr>
+          <th style="width:48px">Pos</th>
+          <th style="width:210px">Part Number</th>
+          <th style="width:90px">Quantity</th>
+          <th style="width:64px">Unit</th>
+          <th style="width:120px">Unit Price</th>
+          <th style="width:120px">Line Total</th>
+          <th style="width:120px">Net Weight</th>
+          <th style="width:80px">Country</th>
+          <th style="width:140px">Actions</th>
+        </tr></thead></table>
       </div>
     </div>
     <div class="table-body-wrapper">
@@ -138,19 +131,17 @@
   const fileInput = document.getElementById('fileInput');
   const headerWrap = document.querySelector('.table-header-wrapper');
   const bodyWrap = document.querySelector('.table-body-wrapper');
+  if(headerWrap && bodyWrap){
+    let syncing=false;
+    bodyWrap.addEventListener('scroll',()=>{ if(syncing) return; syncing=true; headerWrap.scrollLeft = bodyWrap.scrollLeft; syncing=false; });
+    headerWrap.addEventListener('scroll',()=>{ if(syncing) return; syncing=true; bodyWrap.scrollLeft = headerWrap.scrollLeft; syncing=false; });
+  }
 
   uploadBox.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) handleFile(f); });
   uploadBox.addEventListener('dragover', e => { e.preventDefault(); uploadBox.classList.add('dragover'); });
   uploadBox.addEventListener('dragleave', () => uploadBox.classList.remove('dragover'));
   uploadBox.addEventListener('drop', e => { e.preventDefault(); uploadBox.classList.remove('dragover'); const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) handleFile(f); });
-
-  // keep header titles visible on the right: sync horizontal scroll
-  if (headerWrap && bodyWrap) {
-    let syncing = false;
-    bodyWrap.addEventListener('scroll', () => { if (syncing) return; syncing = true; headerWrap.scrollLeft = bodyWrap.scrollLeft; syncing = false; });
-    headerWrap.addEventListener('scroll', () => { if (syncing) return; syncing = true; bodyWrap.scrollLeft = headerWrap.scrollLeft; syncing = false; });
-  }
 
   function isPdfFile(file){ const nameOk=(file.name||'').toLowerCase().endsWith('.pdf'); const typeOk=(file.type||'').toLowerCase()==='application/pdf'; return nameOk || typeOk; }
 
@@ -329,6 +320,7 @@
       }
 
       // === ENRICH & ADD SUBLINES ===
+      // We'll iterate in order, find the text slice for each item, parse steel/alum blocks, create S/A sublines, and reduce main line totals.
       const enriched=[];
       for(let idx=0; idx<lineItems.length; idx++){
         const item=lineItems[idx];
@@ -354,6 +346,7 @@
           const w1 = steelBlock.match(/Total\s+net\s+steel\s+weight\s+per\s+KG:\s*([\d,.]+)/i);
           if(w1) steelWeightKG = parseFloatSafe(w1[1]);
           if(isNaN(steelWeightKG)){
+            // fallback compute from content per PCS * qty per PCS
             const cpcs = steelBlock.match(/Steel\s+content\s+per\s+PCS:\s*([\d,.]+)\s*KG/i);
             const qpcs = steelBlock.match(/Quantity\s+per\s+PCS:\s*([\d,.]+)/i);
             if(cpcs && qpcs){ steelWeightKG = parseFloatSafe(cpcs[1]) * parseFloatSafe(qpcs[1]); }
@@ -367,13 +360,14 @@
         let alumQty = NaN, alumCustomsUSD = NaN, alumUnit='KG';
         if(alumBlockMatch){
           const alumBlock = alumBlockMatch[0];
+          // If Total aluminum content is numeric, take as KG quantity; otherwise leave blank
           const aq = alumBlock.match(/Total\s+aluminum\s+content:\s*([\d,.]+)/i);
           if(aq) alumQty = parseFloatSafe(aq[1]);
           const cvalA = alumBlock.match(/Total\s+customs\s+value:\s*([\d,.]+)\s*USD/i);
           if(cvalA) alumCustomsUSD = parseFloatSafe(cvalA[1]);
         }
 
-        // Reduce the main item total by steel/alum customs
+        // Reduce the main item total by steel/alum customs, if present
         let mainLineTotal = parseFloatSafe(item.line_total);
         const steelAdd = isNaN(steelCustomsUSD)?0:steelCustomsUSD;
         const alumAdd  = isNaN(alumCustomsUSD)?0:alumCustomsUSD;
@@ -384,6 +378,7 @@
 
         enriched.push(item);
 
+        // Insert Steel subline directly below, if we have a customs $ amount
         if(steelAdd>0){
           enriched.push({
             invoice_number: invoiceNum,
@@ -401,6 +396,7 @@
           });
         }
 
+        // Insert Aluminum subline if customs value present
         if(alumAdd>0){
           enriched.push({
             invoice_number: invoiceNum,
@@ -419,6 +415,7 @@
         }
       }
 
+      // Cleanup
       enriched.forEach(it=>{ delete it._matchIndex; });
       if(enriched.length===0){
         enriched.push({invoice_number:invoiceNum,invoice_date:invoiceDate,invoice_total:invoiceTotal,supplier:supplier,position:'',part_number:'',quantity:'',unit:'',unit_price:'',line_total:'',net_weight:'',country_of_origin:''});
@@ -430,7 +427,7 @@
 
   function setupInterface(){
     const select=document.getElementById('invoiceSelect');
-    select.innerHTML='<option value=\"\">Select an invoice...</option>';
+    select.innerHTML='<option value="">Select an invoice...</option>';
     const invoices={};
     allData.forEach(item=>{ if(!invoices[item.invoice_number]){ invoices[item.invoice_number]={date:item.invoice_date,supplier:item.supplier,total:item.invoice_total,itemCount:0}; } invoices[item.invoice_number].itemCount++; });
     invoiceOrder.forEach(num=>{ const inv = invoices[num] || {date:'',supplier:'',total:0,itemCount:0}; const total=parseFloat(inv.total||0).toLocaleString('en-US',{minimumFractionDigits:2}); const opt=document.createElement('option'); opt.value=num; opt.textContent=`Invoice ${num} (${inv.itemCount} items) - ${inv.date} - ${inv.supplier} - $${total}`; select.appendChild(opt); });
@@ -447,7 +444,7 @@
     let items = allData.filter(d=>d.invoice_number===currentInvoice);
     if(items.length===0){ const meta={invoice_number:currentInvoice,invoice_date:'',invoice_total:'',supplier:''}; items=[{...meta,position:'',part_number:'',quantity:'',unit:'',unit_price:'',line_total:'',net_weight:'',country_of_origin:''}]; }
 
-    // Sort: numeric positions first, then S/A
+    // Sort: numeric positions first, then S/A directly after their base line
     items.sort((a,b)=>{
       const parsePos = p=>{ const m=String(p||'').match(/^(\d+)([A-Z]?)$/i); if(!m) return {n:999999,s:'Z'}; return {n:parseInt(m[1],10), s:(m[2]||'')}; };
       const A=parsePos(a.position), B=parsePos(b.position);
@@ -462,7 +459,7 @@
     document.getElementById('statTotal').value=meta.invoice_total||'';
     document.getElementById('statItems').textContent=String(items.length);
 
-    // Table rows
+    // Table
     const tbody=document.getElementById('tableBody');
     tbody.innerHTML='';
     items.forEach((row, idx)=>{ tbody.appendChild(renderRow(row, idx)); });
@@ -496,6 +493,7 @@
     tr.appendChild(cellInput(row.unit,'unit'));
     tr.appendChild(cellInput(row.unit_price,'unit_price'));
     tr.appendChild(cellInput(row.line_total,'line_total'));
+
     tr.appendChild(cellInput(row.net_weight,'net_weight'));
     tr.appendChild(cellInput(row.country_of_origin,'country_of_origin'));
 
@@ -519,6 +517,7 @@
       .map(x=>x.idx);
 
     const realIdx = sortedIdxMap[rowIndex];
+    const globalIdx = allData.findIndex(d=> d.invoice_number===currentInvoice && allData.filter(x=>x.invoice_number===currentInvoice).indexOf(d)===realIdx);
     const recs = allData.filter(d=>d.invoice_number===currentInvoice);
     recs[realIdx][key]=value;
     loadInvoiceData();
@@ -532,8 +531,9 @@
       if(A.n!==B.n) return A.n-B.n; return A.s.localeCompare(B.s);
     });
     const base = items[rowIndex];
-    const insertPos = `${String(base.position).replace(/[^0-9].*$/,'')}${String.fromCharCode(65 + Math.floor(Math.random()*26))}`;
+    const insertPos = `${String(base.position).replace(/[^0-9].*$/,'')}${String.fromCharCode(65 + Math.floor(Math.random()*26))}`; // random letter pos
     const newRow = { invoice_number:currentInvoice, invoice_date:base.invoice_date, invoice_total:base.invoice_total, supplier:base.supplier, position:insertPos, part_number:'', quantity:'', unit:'', unit_price:'', line_total:'', net_weight:'', country_of_origin:base.country_of_origin };
+    // Insert after base in allData for stability
     const firstIdx = allData.findIndex(d=>d===base);
     allData.splice(firstIdx+1,0,newRow);
     loadInvoiceData();
