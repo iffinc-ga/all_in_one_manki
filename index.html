@@ -194,11 +194,15 @@
       descartesTemplate = XLSX.utils.sheet_to_json(templateSheet, { header: 1 })[0];
       
       hideLoading();
+      document.getElementById('uploadSection').style.display = 'block';
       showAlert(`✓ Databases loaded: ${partsDatabase.length} parts, ${steelAluminumMappings.length} Steel/Alum mappings, ${htsCodesUOM.length} HTS codes`, 'success');
+      console.log('✓ Databases loaded successfully. Upload section is now visible.');
+      console.log('Parts:', partsDatabase.length, 'Steel/Aluminum:', steelAluminumMappings.length, 'HTS:', htsCodesUOM.length);
       
       return true;
     } catch (error) {
       hideLoading();
+      document.getElementById('uploadSection').style.display = 'block';
       showAlert('Error loading databases: ' + error.message + '. Make sure updated_manki_db.xlsx and descartes_ci_upload.xlsx are in the same folder!', 'error');
       console.error('Database loading error:', error);
       return false;
@@ -399,11 +403,14 @@
   function showLoading(msg) {
     document.getElementById('loading').style.display = 'block';
     document.querySelector('.loading-text').innerHTML = '<strong>' + msg + '</strong>';
-    document.getElementById('uploadSection').style.display = 'none';
   }
   
   function hideLoading() {
     document.getElementById('loading').style.display = 'none';
+  }
+  
+  function hideUploadSection() {
+    document.getElementById('uploadSection').style.display = 'none';
   }
   
   async function parsePDF(file) {
@@ -794,6 +801,7 @@
       if (!loaded) return;
     }
     
+    hideUploadSection();
     const items = await parsePDF(file);
     allData = items;
     
@@ -828,8 +836,9 @@
   });
   
   // Load databases on page load
-  window.addEventListener('load', () => {
-    loadDatabases();
+  window.addEventListener('load', async () => {
+    showLoading('Loading databases...');
+    await loadDatabases();
   });
   
 </script>
