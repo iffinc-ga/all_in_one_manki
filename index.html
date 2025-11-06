@@ -657,8 +657,8 @@
 
   // CONFIGURATION: Set your GitHub repository details here
   const GITHUB_CONFIG = {
-    owner: 'iffinc-ga',    // Replace with your GitHub username
-    repo: 'all_in_one_manki',           // Replace with your repository name
+    owner: 'YOUR_GITHUB_USERNAME',    // Replace with your GitHub username
+    repo: 'YOUR_REPO_NAME',           // Replace with your repository name
     branch: 'main',                   // Usually 'main' or 'master'
     filePath: 'updated_manki_db.xlsx' // Path to database file in repo
   };
@@ -784,7 +784,48 @@
     const exportRows = [];
 
     items.forEach(item => {
-      const basePartNum = extractBasePartNumber(item.part_number);
+      // Detect if this is a Steel or Aluminum subline
+      const isSteelLine = String(item.part_number).toLowerCase().includes('steel');
+      const isAlumLine = String(item.part_number).toLowerCase().includes('aluminum');
+      
+      let basePartNum = '';
+      let buyerPartNum = '';
+      let supplierPartNum = '';
+      
+      if(isSteelLine || isAlumLine){
+        // This is a steel or aluminum subline from the PDF parsing
+        // Extract the original part number (e.g., "Steel - 40586" -> "40586")
+        const match = String(item.part_number).match(/[Ss]teel\s*-\s*([\d.]+)|[Aa]luminum\s*-\s*([\d.]+)/);
+        if(match){
+          const fullPartNum = match[1] || match[2];
+          basePartNum = extractBasePartNumber(fullPartNum);
+          
+          // Look up tariffs for the original part
+          const tariffs = lookupTariffs(basePartNum);
+          
+          // Find first non-98/99 tariff
+          let lookupTariff = null;
+          for(const tariff of tariffs){
+            if(!tariff.startsWith('98') && !tariff.startsWith('99')){
+              lookupTariff = tariff;
+              break;
+            }
+          }
+          
+          // Get the steel/aluminum part number from Sheet1
+          if(lookupTariff){
+            const steelAlumPartNum = getSteelAlumPartNumber(lookupTariff, isSteelLine ? 'Steel' : 'Aluminum');
+            buyerPartNum = steelAlumPartNum;
+            supplierPartNum = steelAlumPartNum;
+          }
+        }
+      } else {
+        // Regular line item
+        basePartNum = extractBasePartNumber(item.part_number);
+        buyerPartNum = basePartNum;
+        supplierPartNum = basePartNum;
+      }
+      
       const tariffs = lookupTariffs(basePartNum);
       
       // Create main row with all 114 Descartes template columns
@@ -794,8 +835,8 @@
         'InvoiceTotal': item.invoice_total,
         'SupplierMID': '',
         'SupplierName': item.supplier,
-        'BuyerPartNumber': basePartNum,
-        'SupplierPartNumber': basePartNum,
+        'BuyerPartNumber': buyerPartNum,
+        'SupplierPartNumber': supplierPartNum,
         'Quantity': item.quantity,
         'UnitOfMeasure': item.unit,
         'Description': '',
@@ -905,77 +946,64 @@
         '8 Value': ''
       };
 
-      // Populate tariff fields based on database lookups
-      const tariffFields = ['TariffNumber', 'SecondaryTariffNumber', 'ThirdTariffNumber', '4TariffNumber', '5TariffNumber'];
-      
-      tariffs.forEach((tariff, idx) => {
-        if(idx < tariffFields.length){
-          row[tariffFields[idx]] = tariff;
-          
-          // Check if tariff starts with 98 or 99 (exempt from quantity requirements)
-          const startsWithExempt = tariff.startsWith('98') || tariff.startsWith('99');
-          
-          if(!startsWithExempt){
-            // Look up UOM from HTS codes database
-            const uomInfo = lookupHtsUom(tariff);
+      // Only populate tariff fields for regular line items (not steel/aluminum sublines)
+      if(!isSteelLine && !isAlumLine){
+        const tariffFields = ['TariffNumber', 'SecondaryTariffNumber', 'ThirdTariffNumber', '4TariffNumber', '5TariffNumber'];
+        
+        tariffs.forEach((tariff, idx) => {
+          if(idx < tariffFields.length){
+            row[tariffFields[idx]] = tariff;
             
-            // Populate quantities based on tariff position
-            if(idx === 0){
-              // Primary tariff
-              row['Quantity1'] = item.net_weight;
-              row['UnitOfMeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){
-                row['Quantity2'] = item.net_weight;
-                row['UnitOfMeasure2'] = uomInfo.uom2;
-              }
-            } else if(idx === 1){
-              // Secondary tariff
-              row['Secondary Quantity1'] = item.net_weight;
-              row['Secondaryunitofmeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){
-                row['secondaryquantity2'] = item.net_weight;
-                row['secondaryunitofmeasure2'] = uomInfo.uom2;
-              }
-            } else if(idx === 2){
-              // Third tariff
-              row['ThirdTariffQuantity1'] = item.net_weight;
-              row['ThirdTariffUnitofMeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){
-                row['ThirdTariffQuantity2'] = item.net_weight;
-                row['ThirdTariffUnitofMeasure2'] = uomInfo.uom2;
-              }
-            } else if(idx === 3){
-              // 4th tariff
-              row['4TariffQuantity1'] = item.net_weight;
-              row['4TariffUnitofMeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){
-                row['4TariffQuantity2'] = item.net_weight;
-                row['4TariffUnitofMeasure2'] = uomInfo.uom2;
-              }
-            } else if(idx === 4){
-              // 5th tariff
-              row['5TariffQuantity1'] = item.net_weight;
-              row['5TariffUnitofMeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){
-                row['5TariffQuantity2'] = item.net_weight;
-                row['5TariffUnitofMeasure2'] = uomInfo.uom2;
+            // Check if tariff starts with 98 or 99 (exempt from quantity requirements)
+            const startsWithExempt = tariff.startsWith('98') || tariff.startsWith('99');
+            
+            if(!startsWithExempt){
+              // Look up UOM from HTS codes database
+              const uomInfo = lookupHtsUom(tariff);
+              
+              // Populate quantities based on tariff position
+              if(idx === 0){
+                row['Quantity1'] = item.net_weight;
+                row['UnitOfMeasure1'] = uomInfo.uom1;
+                if(uomInfo.uom2){
+                  row['Quantity2'] = item.net_weight;
+                  row['UnitOfMeasure2'] = uomInfo.uom2;
+                }
+              } else if(idx === 1){
+                row['Secondary Quantity1'] = item.net_weight;
+                row['Secondaryunitofmeasure1'] = uomInfo.uom1;
+                if(uomInfo.uom2){
+                  row['secondaryquantity2'] = item.net_weight;
+                  row['secondaryunitofmeasure2'] = uomInfo.uom2;
+                }
+              } else if(idx === 2){
+                row['ThirdTariffQuantity1'] = item.net_weight;
+                row['ThirdTariffUnitofMeasure1'] = uomInfo.uom1;
+                if(uomInfo.uom2){
+                  row['ThirdTariffQuantity2'] = item.net_weight;
+                  row['ThirdTariffUnitofMeasure2'] = uomInfo.uom2;
+                }
+              } else if(idx === 3){
+                row['4TariffQuantity1'] = item.net_weight;
+                row['4TariffUnitofMeasure1'] = uomInfo.uom1;
+                if(uomInfo.uom2){
+                  row['4TariffQuantity2'] = item.net_weight;
+                  row['4TariffUnitofMeasure2'] = uomInfo.uom2;
+                }
+              } else if(idx === 4){
+                row['5TariffQuantity1'] = item.net_weight;
+                row['5TariffUnitofMeasure1'] = uomInfo.uom1;
+                if(uomInfo.uom2){
+                  row['5TariffQuantity2'] = item.net_weight;
+                  row['5TariffUnitofMeasure2'] = uomInfo.uom2;
+                }
               }
             }
           }
-        }
-      });
+        });
+      }
 
       exportRows.push(row);
-
-      // Add Steel line if primary tariff requires it (not 98/99)
-      if(tariffs.length > 0 && !tariffs[0].startsWith('98') && !tariffs[0].startsWith('99')){
-        const steelPartNum = getSteelAlumPartNumber(tariffs[0], 'Steel');
-        const steelRow = {...row};
-        steelRow['BuyerPartNumber'] = steelPartNum;
-        steelRow['SupplierPartNumber'] = steelPartNum;
-        steelRow['UnitOfMeasure'] = 'KG';
-        exportRows.push(steelRow);
-      }
     });
 
     // Generate Excel file
@@ -997,6 +1025,4 @@
     showAlert('Descartes template exported successfully!', 'success');
   }
 
-</script>
-</body>
-</html>
+  
