@@ -115,7 +115,7 @@
 
   <div class="controls" id="controls">
     <select id="invoiceSelect"><option value="">Select an invoice...</option></select>
-    <button class="btn-warning" onclick="exportToDescartes()">📋 Export to Descartes Template</button>
+    <button class="btn-warning" onclick="exportToDescartes()">📋 Export to Descartes Template (All Invoices)</button>
     <button class="btn-success" onclick="exportToExcel()">📥 Export All to Excel</button>
     <button class="btn-info" onclick="addBlankRowForCurrent()">➕ Add Blank Row</button>
     <button class="btn-primary" onclick="resetUpload()">📤 New Upload</button>
@@ -163,7 +163,6 @@
   let currentInvoice = '';
   let invoiceOrder = [];
   let uploadedPdfName = '';
-  let _nextFocusId = null; // preserves focus across re-renders
 
   const uploadBox = document.getElementById('uploadBox');
   const fileInput = document.getElementById('fileInput');
@@ -238,7 +237,7 @@
     }
   }
 
-  function parseFloatSafe(s){ if(s==null) return NaN; const t=String(s).replace(/[,\s]/g,''); const v=parseFloat(t); return isNaN(v)?NaN:v; }
+  function parseFloatSafe(s){ if(s==null) return NaN; const t=String(s).replace(/[\,\s]/g,''); const v=parseFloat(t); return isNaN(v)?NaN:v; }
   function fmt2(n){ const v=parseFloatSafe(n); return isNaN(v)?'':v.toFixed(2); }
 
   function parseInvoices(text){
@@ -487,7 +486,7 @@
     let items = allData.filter(d=>d.invoice_number===currentInvoice);
     if(items.length===0){ const meta={invoice_number:currentInvoice,invoice_date:'',invoice_total:'',supplier:''}; items=[{...meta,position:'',part_number:'',quantity:'',unit:'',unit_price:'',line_total:'',net_weight:'',country_of_origin:''}]; }
 
-    // === Updated: enforce '' < S < A for UI display ===
+    // === Enforce '' < S < A for UI display ===
     items.sort((a,b)=>{
       const A=_parsePos(a.position), B=_parsePos(b.position);
       if(A.n!==B.n) return A.n-B.n;
@@ -520,8 +519,6 @@
       inp.value = (val==null?'':String(val));
       if(readonly) inp.classList.add('readonly');
       inp.readOnly = readonly;
-      const id = `${key}-${idx}-${Math.random().toString(36).slice(2,7)}`;
-      inp.id = id; if(_nextFocusId===id){ setTimeout(()=>inp.focus(),0); _nextFocusId=null; }
       inp.addEventListener('change',()=>{ updateCell(idx,key,inp.value); });
       td.appendChild(inp); return td;
     }
@@ -702,20 +699,25 @@
       console.error('Database load error:', err);
       document.getElementById('dbStatus').textContent = 'Database load failed ✗';
       document.getElementById('dbStatus').className = 'db-status db-error';
-      document.getElementById('dbInfo').innerHTML = `<strong>Error:</strong> ${err.message}<br><strong>Fix:</strong> Update GITHUB_CONFIG in HTML file (lines ~655-660)`;
+      document.getElementById('dbInfo').innerHTML = `<strong>Error:</strong> ${err.message}<br><strong>Fix:</strong> Update GITHUB_CONFIG in HTML file`;
     }
   }
 
+  // === Base 4–5 char part number extractor for main lines ===
   function extractBasePartNumber(fullPartNum){
-    const match = String(fullPartNum).match(/^(\d{4,5})/);
-    return match ? match[1] : '';
+    const s = String(fullPartNum || '').trim();
+    const head = s.split('.')[0];                  // text before first dot
+    const alnum = (head.match(/[A-Za-z0-9]+/)||[''])[0];
+    if (alnum.length >= 5) return alnum.slice(0,5);
+    if (alnum.length === 4) return alnum;          // allow 4-char base
+    const fallback = (s.match(/[A-Za-z0-9]{4,5}/)||[''])[0];
+    return fallback || alnum || '';
   }
 
   function lookupTariffs(basePartNum){
     if(!mankiDb) return [];
     const part = mankiDb.find(row => String(row['PRIMARY PART NUM']) === basePartNum);
     if(!part) return [];
-    
     const tariffs = [];
     for(let i=0; i<=5; i++){
       const col = i===0 ? 'TARIFF NUM' : `TARIFF NUM_${i}`;
@@ -741,7 +743,7 @@
     return type === 'Steel' ? 'STEEL GENERIC' : 'ALUM GENERIC';
   }
 
-  // === UPDATED: Export ALL invoices to Descartes template (global sort, S before A) ===
+  // === Export ALL invoices to Descartes template (global sort, S before A) ===
   function exportToDescartes(){
     if(!mankiDb || !htsCodesDb || !steelAlumDb){
       showAlert('Database not loaded yet. Please wait for it to load from GitHub.','error');
@@ -749,8 +751,7 @@
     }
     if(!allData.length){ showAlert('No data to export','error'); return; }
 
-    // Use all rows, sorted invoice -> base pos -> S before A
-    const items = (window.__dataArrayRef || allData).slice().sort((a,b)=>{
+    const items = allData.slice().sort((a,b)=>{
       const ai = String(a.invoice_number||''); const bi = String(b.invoice_number||'');
       if (ai !== bi) return ai.localeCompare(bi);
       const A=_parsePos(a.position), B=_parsePos(b.position);
@@ -761,36 +762,32 @@
     const exportRows = [];
 
     items.forEach(item => {
-      const basePartNum = extractBasePartNumber(item.part_number);
-      const tariffs = lookupTariffs(basePartNum);
-
       const isSteelLine = String(item.position||'').endsWith('S') || item.part_number === 'STEEL';
       const isAlumLine  = String(item.position||'').endsWith('A') || item.part_number === 'ALUMINUM';
-      
-      let buyerPartNum = basePartNum;
-      let supplierPartNum = basePartNum;
 
-      // For S/A sublines, derive part # from the PARENT LINE'S tariff within the SAME invoice
-      if(isSteelLine || isAlumLine){
+      // === Buyer/Supplier part number logic ===
+      let buyerPartNum, supplierPartNum;
+      if (!isSteelLine && !isAlumLine) {
+        const basePart = extractBasePartNumber(item.part_number);
+        buyerPartNum = basePart;
+        supplierPartNum = basePart;
+      } else {
         const parentPos = String(item.position||'').replace(/[SA]$/,'');
         const parentItem = items.find(it => it.invoice_number===item.invoice_number && it.position === parentPos);
-        if(parentItem){
+        let tariffForSubline = null;
+        if (parentItem) {
           const parentBase = extractBasePartNumber(parentItem.part_number);
           const parentTariffs = lookupTariffs(parentBase);
-          const tariffForSubline = parentTariffs.find(t => !String(t).startsWith('98') && !String(t).startsWith('99'));
-          if(tariffForSubline){
-            const subNum = getSteelAlumPartNumber(tariffForSubline, isSteelLine ? 'Steel' : 'Aluminum');
-            buyerPartNum = subNum; supplierPartNum = subNum;
-          }else{
-            buyerPartNum = isSteelLine ? 'STEEL GENERIC' : 'ALUM GENERIC';
-            supplierPartNum = buyerPartNum;
-          }
-        }else{
-          buyerPartNum = isSteelLine ? 'STEEL GENERIC' : 'ALUM GENERIC';
-          supplierPartNum = buyerPartNum;
+          tariffForSubline = parentTariffs.find(t => !String(t).startsWith('98') && !String(t).startsWith('99')) || null;
         }
+        const subNum = tariffForSubline
+          ? getSteelAlumPartNumber(tariffForSubline, isSteelLine ? 'Steel' : 'Aluminum')
+          : (isSteelLine ? 'STEEL GENERIC' : 'ALUM GENERIC');
+        buyerPartNum = subNum;
+        supplierPartNum = subNum;
       }
-      
+
+      // Build Descartes row
       const row = {
         'InvoiceNumber': item.invoice_number,
         'InvoiceDate': item.invoice_date,
@@ -878,38 +875,18 @@
         '5TariffUnitofMeasure2': '',
         '5TariffQuantity3': '',
         '5TariffUnitofMeasure3': '',
-        '5 Value': '',
-        '6TariffNumber': '',
-        '6TariffDescription': '',
-        '6TariffQuantity1': '',
-        '6TariffUnitofMeasure1': '',
-        '6TariffQuantity2': '',
-        '6TariffUnitofMeasure2': '',
-        '6TariffQuantity3': '',
-        '6TariffUnitofMeasure3': '',
-        '6 Value': '',
-        '7TariffNumber': '',
-        '7TariffDescription': '',
-        '7TariffQuantity1': '',
-        '7TariffUnitofMeasure1': '',
-        '7TariffQuantity2': '',
-        '7TariffUnitofMeasure2': '',
-        '7TariffQuantity3': '',
-        '7TariffUnitofMeasure3': '',
-        '7 Value': '',
-        '8TariffNumber': '',
-        '8TariffDescription': '',
-        '8TariffQuantity1': '',
-        '8TariffUnitofMeasure1': '',
-        '8TariffQuantity2': '',
-        '8TariffUnitofMeasure2': '',
-        '8TariffQuantity3': '',
-        '8TariffUnitofMeasure3': '',
-        '8 Value': ''
+        '5 Value': ''
       };
 
+      // For S/A sublines: mirror displayed Quantity into NetWeight as requested
+      if (isSteelLine || isAlumLine) {
+        row['NetWeight'] = item.quantity;
+      }
+
+      const basePartNum = extractBasePartNumber(item.part_number);
+      const tariffs = lookupTariffs(basePartNum);
+
       const tariffFields = ['TariffNumber', 'SecondaryTariffNumber', 'ThirdTariffNumber', '4TariffNumber', '5TariffNumber'];
-      
       tariffs.forEach((tariff, idx) => {
         if(idx < tariffFields.length){
           row[tariffFields[idx]] = tariff;
@@ -942,16 +919,6 @@
       });
 
       exportRows.push(row);
-
-      // Optional extra steel row driven by tariff (kept from your original)
-      if(tariffs.length > 0 && !String(tariffs[0]).startsWith('98') && !String(tariffs[0]).startsWith('99')){
-        const steelPartNum = getSteelAlumPartNumber(tariffs[0], 'Steel');
-        const steelRow = {...row};
-        steelRow['BuyerPartNumber'] = steelPartNum;
-        steelRow['SupplierPartNumber'] = steelPartNum;
-        steelRow['UnitOfMeasure'] = 'KG';
-        exportRows.push(steelRow);
-      }
     });
 
     const wb = XLSX.utils.book_new();
@@ -1074,7 +1041,7 @@
             candidates.push({name:k, ref:v});
           }
         }
-      }catch(_){}
+      }catch(_){ }
     }
     candidates.sort((a,b)=> (b.ref.length||0) - (a.ref.length||0));
     return candidates[0] || null;
@@ -1122,13 +1089,13 @@
     window.__dataArrayName = found.name;
     window.__dataArrayRef  = found.ref;
     const proxied = proxyWithAutoReorder(found.ref);
-    try { window[found.name] = proxied; } catch(_){}
+    try { window[found.name] = proxied; } catch(_){ }
     try { reorderSteelAlum(window.__dataArrayRef); } catch(e){}
     hookRenderIfPresent();
     document.addEventListener('click', (e)=>{
       const id = (e.target && e.target.id || '').toLowerCase();
       if (id.includes('export')) {
-        try { reorderSteelAlum(window.__dataArrayRef); } catch(_){}
+        try { reorderSteelAlum(window.__dataArrayRef); } catch(_){ }
       }
     }, true);
   }
