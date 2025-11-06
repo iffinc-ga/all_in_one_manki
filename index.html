@@ -787,6 +787,42 @@
       const basePartNum = extractBasePartNumber(item.part_number);
       const tariffs = lookupTariffs(basePartNum);
       
+      // Check if this is a steel/aluminum subline (position ends with S or A, or part_number is STEEL/ALUMINUM)
+      const isSteelLine = item.position.endsWith('S') || item.part_number === 'STEEL';
+      const isAlumLine = item.position.endsWith('A') || item.part_number === 'ALUMINUM';
+      
+      let buyerPartNum = basePartNum;
+      let supplierPartNum = basePartNum;
+      
+      // For steel/aluminum lines, get the correct part number from the parent's tariff
+      if(isSteelLine || isAlumLine){
+        // Extract parent position (remove the S or A suffix)
+        const parentPos = item.position.replace(/[SA]$/, '');
+        const parentItem = items.find(it => it.position === parentPos);
+        
+        if(parentItem){
+          const parentBasePartNum = extractBasePartNumber(parentItem.part_number);
+          const parentTariffs = lookupTariffs(parentBasePartNum);
+          
+          // Find the first non-98/99 tariff
+          const tariffForSubline = parentTariffs.find(t => !t.startsWith('98') && !t.startsWith('99'));
+          
+          if(tariffForSubline){
+            const sublinePartNum = getSteelAlumPartNumber(tariffForSubline, isSteelLine ? 'Steel' : 'Aluminum');
+            buyerPartNum = sublinePartNum;
+            supplierPartNum = sublinePartNum;
+          } else {
+            // No valid tariff found, use generic
+            buyerPartNum = isSteelLine ? 'STEEL GENERIC' : 'ALUM GENERIC';
+            supplierPartNum = isSteelLine ? 'STEEL GENERIC' : 'ALUM GENERIC';
+          }
+        } else {
+          // Parent not found, use generic
+          buyerPartNum = isSteelLine ? 'STEEL GENERIC' : 'ALUM GENERIC';
+          supplierPartNum = isSteelLine ? 'STEEL GENERIC' : 'ALUM GENERIC';
+        }
+      }
+      
       // Create main row with all 114 Descartes template columns
       const row = {
         'InvoiceNumber': item.invoice_number,
@@ -794,8 +830,8 @@
         'InvoiceTotal': item.invoice_total,
         'SupplierMID': '',
         'SupplierName': item.supplier,
-        'BuyerPartNumber': basePartNum,
-        'SupplierPartNumber': basePartNum,
+        'BuyerPartNumber': buyerPartNum,
+        'SupplierPartNumber': supplierPartNum,
         'Quantity': item.quantity,
         'UnitOfMeasure': item.unit,
         'Description': '',
