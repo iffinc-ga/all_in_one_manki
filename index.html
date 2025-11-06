@@ -2,10 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Invoice PDF Parser & Editor — Steel/Aluminum Sublines (Fixed)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Manki Invoice Parser — Steel/Aluminum + DB Fallback</title>
+
+  <!-- libs -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:Arial, sans-serif;background:#f5f7fa;padding:20px}
@@ -35,6 +38,15 @@
     .stat-value.error{color:#dc3545}.stat-value.success{color:#28a745}
     .stat input{width:100%;padding:6px;border:1px solid #ced4da;border-radius:3px;font-size:16px;font-weight:bold}
     .stat.editable{border-left-color:#007bff}
+
+    .db-section{padding:20px;background:#e7f3ff;border-bottom:1px solid #b3d9ff}
+    .db-status{display:inline-block;padding:5px 10px;border-radius:4px;font-size:12px;margin-left:10px}
+    .db-loaded{background:#d4edda;color:#155724}
+    .db-loading{background:#fff3cd;color:#856404}
+    .db-error{background:#f8d7da;color:#721c24}
+    .db-info{font-size:12px;color:#004085;margin-top:5px}
+    .inline-help{font-size:12px;color:#6c757d;margin-left:8px}
+
     .table-container{padding:20px;display:none}
     .table-header-wrapper{background:#343a40;overflow:auto}
     .table-header-wrapper::-webkit-scrollbar{display:none}
@@ -49,43 +61,42 @@
     .table-body tr:hover td{background:#f8f9fa}
     .table-body td input{width:100%;padding:6px;border:1px solid #ced4da;border-radius:3px;font-size:13px}
     .table-body td input:focus{outline:none;border-color:#667eea}
-    .readonly{background:#e9ecef!important}
     .actions{text-align:center}
     .actions button{padding:4px 8px;font-size:12px;margin:0 2px}
-    .inline-help{font-size:12px;color:#6c757d;margin-left:8px}
-
-    .db-section{padding:20px;background:#e7f3ff;border-bottom:1px solid #b3d9ff}
-    .db-status{display:inline-block;padding:5px 10px;border-radius:4px;font-size:12px;margin-left:10px}
-    .db-loaded{background:#d4edda;color:#155724}
-    .db-loading{background:#fff3cd;color:#856404}
-    .db-error{background:#f8d7da;color:#721c24}
-    .db-info{font-size:12px;color:#004085;margin-top:5px}
 
     .table-header table, .table-body table{table-layout:fixed}
     .table-header th:nth-child(1), .table-body td:nth-child(1){width:44px!important}
     .table-header th:nth-child(2), .table-body td:nth-child(2){width:210px!important}
-    .table-header th:nth-child(3), .table-body td:nth-child(3){width:80px!important}
-    .table-header th:nth-child(4), .table-body td:nth-child(4){width:56px!important}
+    .table-header th:nth-child(3), .table-body td:nth-child(3){width:90px!important}
+    .table-header th:nth-child(4), .table-body td:nth-child(4){width:64px!important}
     .table-header th:nth-child(5), .table-body td:nth-child(5){width:120px!important}
     .table-header th:nth-child(6), .table-body td:nth-child(6){width:120px!important}
-    .table-header th:nth-child(7), .table-body td:nth-child(7){width:96px!important}
-    .table-header th:nth-child(8), .table-body td:nth-child(8){width:64px!important}
+    .table-header th:nth-child(7), .table-body td:nth-child(7){width:120px!important}
+    .table-header th:nth-child(8), .table-body td:nth-child(8){width:80px!important}
     .table-header th:nth-child(9), .table-body td:nth-child(9){width:140px!important}
     .table-body td{padding:6px 6px}
-    .table-body td input{width:100%;}
+    .table-body td input{width:100%}
+    @keyframes fadeIn{from{opacity:.4}to{opacity:1}}
   </style>
 </head>
 <body>
 <div class="container">
   <div class="header">
-    <h1>📄 Invoice PDF Parser & Editor</h1>
+    <h1>📄 Manki Invoice PDF Parser</h1>
     <p>Steel/Aluminum sublines below each main line. Export-ready.</p>
   </div>
 
+  <!-- DB status + local fallback -->
   <div class="db-section" id="dbSection">
     <strong>Database Status:</strong>
     <span class="db-status db-loading" id="dbStatus">Loading database from repository...</span>
     <div class="db-info" id="dbInfo">Fetching updated_manki_db.xlsx from GitHub...</div>
+
+    <div style="margin-top:10px">
+      <input id="dbLocalFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+      <button class="btn-info" onclick="loadDatabaseFromLocal()">Use local DB file</button>
+      <span class="inline-help">Use if GitHub fetch fails.</span>
+    </div>
   </div>
 
   <div class="upload-section" id="uploadSection">
@@ -109,7 +120,7 @@
     <button class="btn-success" onclick="exportToExcel()">📥 Export All to Excel</button>
     <button class="btn-info" onclick="addBlankRowForCurrent()">➕ Add Blank Row</button>
     <button class="btn-primary" onclick="resetUpload()">📤 New Upload</button>
-    <span class="inline-help">Tip: Use <strong>Tab</strong>/<strong>Shift+Tab</strong> or <strong>Enter</strong> to move between fields.</span>
+    <span class="inline-help">Tip: Tab/Shift+Tab or Enter navigates between fields.</span>
   </div>
 
   <div class="stats" id="stats">
@@ -126,15 +137,15 @@
     <div class="table-header-wrapper">
       <div class="table-header">
         <table><thead><tr>
-          <th style="width:48px">Pos</th>
-          <th style="width:210px">Part Number</th>
-          <th style="width:90px">Quantity</th>
-          <th style="width:64px">Unit</th>
-          <th style="width:120px">Unit Price</th>
-          <th style="width:120px">Line Total</th>
-          <th style="width:120px">Net Weight</th>
-          <th style="width:80px">Country</th>
-          <th style="width:140px">Actions</th>
+          <th>Pos</th>
+          <th>Part Number</th>
+          <th>Quantity</th>
+          <th>Unit</th>
+          <th>Unit Price</th>
+          <th>Line Total</th>
+          <th>Net Weight</th>
+          <th>Country</th>
+          <th>Actions</th>
         </tr></thead></table>
       </div>
     </div>
@@ -147,6 +158,7 @@
 </div>
 
 <script>
+  // pdf.js worker
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
   let allData = [];
@@ -154,6 +166,102 @@
   let invoiceOrder = [];
   let uploadedPdfName = '';
 
+  // === DB state (populated when workbook loads) ===
+  let mankiDb=null, htsCodesDb=null, steelAlumDb=null;
+
+  // ====== GitHub DB Loader (with timeout & local fallback) ======
+  const GITHUB_CONFIG = {
+    owner: 'iffinc-ga',
+    repo: 'all_in_one_manki',
+    branch: 'main',
+    filePath: 'updated_manki_db.xlsx'
+  };
+
+  function setDbErrorUI(msg) {
+    const st = document.getElementById('dbStatus');
+    st.textContent = 'Database load failed ✗';
+    st.className = 'db-status db-error';
+    document.getElementById('dbInfo').innerHTML =
+      `<strong>Error:</strong> ${msg}<br><strong>Fix:</strong> Click "Use local DB file" and select updated_manki_db.xlsx`;
+  }
+
+  function setDbLoadedUI(sourceLabel) {
+    const rows = (mankiDb?.length||0);
+    const hts  = (htsCodesDb?.length||0);
+    const map  = (steelAlumDb?.length||0);
+    const st = document.getElementById('dbStatus');
+    st.textContent = `Database loaded ✓ (${rows} parts, ${hts} HTS, ${map} mappings)`;
+    st.className = 'db-status db-loaded';
+    document.getElementById('dbInfo').textContent =
+      `Loaded: ${new Date().toLocaleString()} | Source: ${sourceLabel}`;
+  }
+
+  async function parseWorkbookToDbs(workbook) {
+    if (workbook.SheetNames.includes('supplier_full_name')) {
+      mankiDb = XLSX.utils.sheet_to_json(workbook.Sheets['supplier_full_name']);
+    } else throw new Error('supplier_full_name sheet not found');
+
+    if (workbook.SheetNames.includes('manki_hts_codes_with_uom')) {
+      htsCodesDb = XLSX.utils.sheet_to_json(workbook.Sheets['manki_hts_codes_with_uom']);
+    } else throw new Error('manki_hts_codes_with_uom sheet not found');
+
+    if (workbook.SheetNames.includes('Sheet1')) {
+      steelAlumDb = XLSX.utils.sheet_to_json(workbook.Sheets['Sheet1']);
+    } else throw new Error('Sheet1 sheet not found');
+  }
+
+  async function loadDatabaseFromLocal() {
+    try {
+      const input = document.getElementById('dbLocalFile');
+      if (!input.files || !input.files[0]) {
+        setDbErrorUI('No local file selected');
+        return;
+      }
+      const buf = await input.files[0].arrayBuffer();
+      const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+      await parseWorkbookToDbs(wb);
+      setDbLoadedUI('Local file');
+    } catch (err) {
+      console.error(err);
+      setDbErrorUI(err.message || String(err));
+    }
+  }
+
+  async function loadDatabaseFromGitHub() {
+    const { owner, repo, branch, filePath } = GITHUB_CONFIG;
+    const dbUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
+
+    const st = document.getElementById('dbStatus');
+    st.textContent = 'Loading database...';
+    st.className = 'db-status db-loading';
+    document.getElementById('dbInfo').textContent = `Fetching from: ${dbUrl}`;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000); // 12 sec
+
+    try {
+      const res = await fetch(dbUrl, { signal: controller.signal, cache: 'no-store' });
+      clearTimeout(timer);
+
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      const data = new Uint8Array(await res.arrayBuffer());
+      const workbook = XLSX.read(data, { type: 'array' });
+
+      await parseWorkbookToDbs(workbook);
+      setDbLoadedUI('GitHub Repository');
+    } catch (err) {
+      clearTimeout(timer);
+      console.error('Database load error:', err);
+      const why = err.name === 'AbortError' ? 'Timed out fetching from GitHub' : (err.message || String(err));
+      setDbErrorUI(why);
+    }
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+    loadDatabaseFromGitHub(); // try GitHub first
+  });
+
+  // ====== UI helpers ======
   const uploadBox = document.getElementById('uploadBox');
   const fileInput = document.getElementById('fileInput');
   const headerWrap = document.querySelector('.table-header-wrapper');
@@ -180,6 +288,7 @@
     setTimeout(()=>{ el.style.display='none'; }, 4000);
   }
 
+  // ====== PDF handling ======
   async function handleFile(file){
     if(!isPdfFile(file)){ showAlert('Please upload a PDF file','error'); return; }
     uploadedPdfName = (file.name||'').replace(/\.pdf$/i,'');
@@ -227,6 +336,7 @@
     }
   }
 
+  // ====== Parsing ======
   function parseFloatSafe(s){ if(s==null) return NaN; const t=String(s).replace(/[\,\s]/g,''); const v=parseFloat(t); return isNaN(v)?NaN:v; }
   function fmt2(n){ const v=parseFloatSafe(n); return isNaN(v)?'':v.toFixed(2); }
   function isNum(v){ return Number.isFinite(parseFloatSafe(v)); }
@@ -234,7 +344,7 @@
   function parseInvoices(text){
     allData=[]; invoiceOrder=[]; text = String(text||'');
 
-    // Split invoices
+    // Split into per-invoice sections
     const splits = text.split(/Customs\s+Invoice\s+(\d+)\s+from/gi);
     const invoiceGroups = {};
     for(let i=1;i<splits.length;i+=2){
@@ -247,6 +357,7 @@
     Object.keys(invoiceGroups).forEach(invoiceNum => {
       const sectionText = invoiceGroups[invoiceNum] || '';
 
+      // Simple header fields
       const dateMatch = sectionText.match(/^\s*(\d{2}\/\d{2}\/\d{4})/);
       const invoiceDate = dateMatch ? dateMatch[1] : '';
 
@@ -448,7 +559,9 @@
         // Subtract numeric customs from base line total (if any)
         if(isNum(baseClone.line_total) && minusFromBase>0){
           baseClone.line_total = fmt2(parseFloatSafe(baseClone.line_total) - minusFromBase);
-          enriched[enriched.length-1-(isNum(alumCustomsUSD)?1:0)-(isNum(steelCustomsUSD)?1:0)] = baseClone;
+          // Replace the original base clone in enriched at its position
+          const baseIdx = enriched.findIndex((x, i) => i ===  enriched.length - 1 - (isNum(alumCustomsUSD)?1:0) - (isNum(steelCustomsUSD)?1:0));
+          if(baseIdx >= 0) enriched[baseIdx] = baseClone;
         }
       }
 
@@ -457,8 +570,7 @@
     });
   }
 
-  // ==== UI Helpers (unchanged from your version) ====
-
+  // ====== Interface ======
   function setupInterface(){
     const controls=document.getElementById('controls');
     const stats=document.getElementById('stats');
@@ -510,7 +622,7 @@
     });
 
     tb.innerHTML = rows.map((r,idx)=>`
-      <tr>
+      <tr style="animation:fadeIn .2s">
         <td><input value="${r.position||''}" onchange="editCell(${idx},'position',this.value)"></td>
         <td><input value="${r.part_number||''}" onchange="editCell(${idx},'part_number',this.value)"></td>
         <td><input value="${r.quantity||''}" onchange="editCell(${idx},'quantity',this.value)"></td>
@@ -532,7 +644,6 @@
     const rows = rowsForCurrent();
     const row = rows[viewIdx];
     if(!row) return;
-    // find the actual object reference in allData
     const idx = allData.indexOf(allData.filter(d=>d.invoice_number===currentInvoice)[viewIdx]);
     if(idx>=0){ allData[idx][key]=val; refreshStats(); }
   }
@@ -556,7 +667,7 @@
     allData.push(blank); refreshTable(); refreshStats();
   }
 
-  // === Minimal stubs for exports (same as your file) ===
+  // === Minimal export stubs (same behavior as your last working copy) ===
   function exportToExcel(){ showAlert('Export to Excel not changed in this fix.'); }
   function exportToDescartes(){ showAlert('Descartes export (all invoices) not changed in this fix.'); }
 
