@@ -690,9 +690,21 @@
     document.getElementById('dbInfo').textContent = `Fetching from: ${dbUrl}`;
 
     try {
-      const response = await fetch(dbUrl);
+      // Add timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      const response = await fetch(dbUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        if(response.status === 404){
+          throw new Error(`File not found (404). Check that updated_manki_db.xlsx is in the root of your repository.`);
+        } else if(response.status === 403){
+          throw new Error(`Access forbidden (403). Your repository may be private. Go to Settings → Make repository public.`);
+        } else {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
       }
 
       const arrayBuffer = await response.arrayBuffer();
@@ -725,7 +737,24 @@
       console.error('Database load error:', err);
       document.getElementById('dbStatus').textContent = 'Database load failed ✗';
       document.getElementById('dbStatus').className = 'db-status db-error';
-      document.getElementById('dbInfo').innerHTML = `<strong>Error:</strong> ${err.message}<br><strong>Fix:</strong> Update GITHUB_CONFIG in HTML file (lines ~655-660)`;
+      
+      let errorMsg = err.message;
+      let fixMsg = '';
+      
+      if(err.name === 'AbortError'){
+        errorMsg = 'Request timeout (10 seconds). Check your internet connection.';
+        fixMsg = 'Try reloading the page or check that the database file exists.';
+      } else if(errorMsg.includes('403')){
+        fixMsg = '<strong>Fix:</strong> Make your repository public at: https://github.com/iffinc-ga/all_in_one_manki/settings<br>' +
+                 'Scroll to "Danger Zone" → Change visibility → Make Public';
+      } else if(errorMsg.includes('404')){
+        fixMsg = '<strong>Fix:</strong> Upload updated_manki_db.xlsx to the root of your repository<br>' +
+                 'Or update filePath in HTML if it's in a subfolder';
+      } else {
+        fixMsg = '<strong>Test URL:</strong> <a href="https://raw.githubusercontent.com/iffinc-ga/all_in_one_manki/main/updated_manki_db.xlsx" target="_blank">Click here</a> (should download Excel file)';
+      }
+      
+      document.getElementById('dbInfo').innerHTML = `<strong>Error:</strong> ${errorMsg}<br>${fixMsg}`;
     }
   }
 
