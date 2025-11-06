@@ -656,16 +656,12 @@
   let steelAlumDb = null;
 
   // CONFIGURATION: Set your GitHub repository details here
-  // Leave as-is to skip auto-load, or fill in your details to enable auto-load
   const GITHUB_CONFIG = {
-    owner: 'iffinc-ga',               // Your GitHub username
-    repo: 'all_in_one_manki',         // Your repository name
-    branch: 'main',                   // Branch name
+    owner: 'iffinc-ga',    // Replace with your GitHub username
+    repo: 'all_in_one_manki',           // Replace with your repository name
+    branch: 'main',                   // Usually 'main' or 'master'
     filePath: 'updated_manki_db.xlsx' // Path to database file in repo
   };
-  
-  // Check if config is set
-
 
   // Auto-load database when page loads
   window.addEventListener('DOMContentLoaded', function() {
