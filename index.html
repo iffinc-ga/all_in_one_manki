@@ -1100,6 +1100,71 @@
   };
 })();
 </script>
+<script>
+(function(){
+  // Compute ordering key + intended order for a row
+  function _posInfo(row){
+    // Adjust field names if yours differ, but most of your builds use these keys:
+    const inv = String(row.invoice || '').trim();
+    const pos = String(row.pos || '').trim();
+
+    // Base POS (strip trailing S/A only). Handles "10", "10S", "10A", "1,0", "1,0S", "10.0A", etc.
+    const base = pos.replace(/[SA]$/i, '');
+
+    // Suffix order: base (0) < S (1) < A (2)
+    let ord = 0;
+    if (/S$/i.test(pos)) ord = 1;
+    else if (/A$/i.test(pos)) ord = 2;
+
+    return { group: inv + '||' + base, ord };
+  }
+
+  // Stable regroup: for each (invoice + base POS) cluster, ensure '' < S < A
+  function reorderSteelAlum(all){
+    if (!Array.isArray(all) || all.length === 0) return;
+    const groupMap = new Map();
+
+    // bucket by group while keeping original indices for stable sorting
+    all.forEach((r, idx) => {
+      const { group, ord } = _posInfo(r);
+      if (!groupMap.has(group)) groupMap.set(group, []);
+      groupMap.get(group).push({ r, idx, ord });
+    });
+
+    const out = [];
+    const visited = new Set();
+
+    // walk original order; when we hit a group's first row, emit the whole group in desired order
+    all.forEach((r, idx) => {
+      if (visited.has(idx)) return;
+      const { group } = _posInfo(r);
+      const bucket = groupMap.get(group);
+      if (!bucket) { out.push(r); return; }
+      bucket.sort((a, b) => (a.ord - b.ord) || (a.idx - b.idx)); // '' < S < A; stable inside each tier
+      bucket.forEach(({ r: row, idx: i }) => { out.push(row); visited.add(i); });
+      groupMap.delete(group);
+    });
+
+    // mutate in place so your code references the same array
+    all.length = 0;
+    Array.prototype.push.apply(all, out);
+  }
+
+  // Hook into your existing render function
+  if (window.allData && typeof window.renderTable === 'function') {
+    const _render = window.renderTable;
+    window.renderTable = function(){
+      try { reorderSteelAlum(window.allData); } catch (e) { /* no-op on error */ }
+      return _render.apply(this, arguments);
+    };
+  }
+
+  // Optional: do an immediate reorder once (in case the table is already rendered on load)
+  if (Array.isArray(window.allData)) {
+    try { reorderSteelAlum(window.allData); } catch (e) {}
+  }
+})();
+</script>
 
 
 </body>
