@@ -656,16 +656,29 @@
   let steelAlumDb = null;
 
   // CONFIGURATION: Set your GitHub repository details here
+  // Leave as-is to skip auto-load, or fill in your details to enable auto-load
   const GITHUB_CONFIG = {
-    owner: 'iffinc-ga',    // Replace with your GitHub username
-    repo: 'all_in_one_manki',           // Replace with your repository name
-    branch: 'main',                   // Usually 'main' or 'master'
+    owner: 'iffinc-ga',               // Your GitHub username
+    repo: 'all_in_one_manki',         // Your repository name
+    branch: 'main',                   // Branch name
     filePath: 'updated_manki_db.xlsx' // Path to database file in repo
   };
+  
+  // Check if config is set
+  const isGitHubConfigured = GITHUB_CONFIG.owner !== 'YOUR_GITHUB_USERNAME' && 
+                              GITHUB_CONFIG.repo !== 'YOUR_REPO_NAME';
 
-  // Auto-load database when page loads
+  // Auto-load database when page loads (if configured)
   window.addEventListener('DOMContentLoaded', function() {
-    loadDatabaseFromGitHub();
+    if(isGitHubConfigured){
+      loadDatabaseFromGitHub();
+    } else {
+      document.getElementById('dbStatus').textContent = 'GitHub not configured';
+      document.getElementById('dbStatus').className = 'db-status db-error';
+      document.getElementById('dbInfo').innerHTML = 
+        '<strong>To enable auto-load:</strong> Edit lines ~655-660 in this HTML file with your GitHub details.<br>' +
+        '<strong>You can still use the tool!</strong> PDF parsing works without database. Export to Descartes requires database.';
+    }
   });
 
   async function loadDatabaseFromGitHub() {
@@ -770,7 +783,7 @@
   function exportToDescartes(){
     if(!currentInvoice){ showAlert('Select an invoice first','error'); return; }
     if(!mankiDb || !htsCodesDb || !steelAlumDb){
-      showAlert('Database not loaded yet. Please wait for it to load from GitHub.','error');
+      showAlert('Database not loaded. Configure GITHUB_CONFIG in HTML file (lines ~655-660) and reload page.','error');
       return;
     }
 
