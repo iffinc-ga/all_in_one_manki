@@ -1036,6 +1036,7 @@
 
 </script>
 <script>
+/* ==== Runtime “no-UI-change” patch: normalize only when needed ==== */
 (function(){
   function normalizeWeirdSpacing(s){
     const esc = (ch)=>ch.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
@@ -1043,45 +1044,63 @@
       const pat = new RegExp(word.split('').map(esc).join('\\s*'),'ig');
       return (txt)=>txt.replace(pat, word);
     };
-    const common = ['Steel','Aluminum','Packaging','Content','Quantity','per','PCS','Total','net','weight','value','customs','KG','invoice','Country','origin','product'];
-    let out = s;
+    const common = [
+      'Steel','Aluminum','Packaging','Content','Quantity','per','PCS',
+      'Total','net','weight','value','customs','KG','invoice','Country','origin','product'
+    ];
+    let out = String(s);
+
+    // Generic pass: stitch frequent words back together (St eel -> Steel, w eight -> weight, etc.)
     for(const w of common){ out = squish(w)(out); }
-    return out
+
+    // Headers that often appear split
+    out = out
       .replace(/9903\.81\.91\s*-\s*S\s*t\s*e\s*e\s*l\s*\s*P\s*a\s*c\s*k\s*a\s*g\s*i\s*n\s*g/ig, '9903.81.91 - Steel Packaging')
-      .replace(/9903\.85\.08\s*-\s*A\s*l\s*u\s*m\s*i\s*n\s*u\s*m\s*\s*C\s*o\s*n\\s*t\\s*e\\s*n\\s*t/ig, '9903.85.08 - Aluminum Content')
+      .replace(/9903\.85\.08\s*-\s*A\s*l\s*u\s*m\s*i\s*n\s*u\s*m\s*\s*C\s*o\s*n\s*t\s*e\s*n\s*t(?:\s*\(in\s*metallic\s*paint\))?/ig, '9903.85.08 - Aluminum Content (in metallic paint)');
+
+    // Normalize labels so your existing regexes hit exact strings
+    out = out
       .replace(/Total\s+net\s+steel\s+weight\s*(?:per\s*KG)?\s*:/ig, 'Total net steel weight per KG:')
       .replace(/Total\s+net\s+aluminum\s+weight\s*(?:per\s*KG)?\s*:/ig, 'Total net aluminum weight per KG:')
       .replace(/Steel\s*content\s*per\s*PCS\s*:/ig, 'Steel content per PCS:')
       .replace(/Aluminum\s*content\s*per\s*PCS\s*:/ig, 'Aluminum content per PCS:')
       .replace(/Quantity\s*per\s*PCS\s*:/ig, 'Quantity per PCS:')
       .replace(/Total\s+customs\s+value\s*:/ig, 'Total customs value:');
+
+    // Clean trailing price after KG so "... ([\\d,.]+) KG" still matches
+    // e.g. "1.000   KG / 6.61 USD" -> "1.000 KG"
+    out = out.replace(/(\bKG)\s*\/\s*[0-9][0-9.,]*\s*USD\b/ig, '$1');
+
+    // Collapse awkward multiple spaces produced during stitching
+    out = out.replace(/\s{2,}/g, ' ');
+    return out;
   }
 
-  const STEEL_SRC = /9903\\\.81\\\.91[\\s\\S]*Steel\\s*Packaging/;
-  const ALUM_SRC  = /9903\\\.85\\\.08[\\s\\S]*Aluminum\\s*Content/;
-  const WEIGHT_SRC = /Total\\s+net\\s+(steel|aluminum)\\s+weight/;
-  const CONTENT_SRC = /(Steel|Aluminum)\\s*content\\s*per\\s*PCS/;
-  const QPCS_SRC = /Quantity\\s*per\\s*PCS/;
-  const CVAL_SRC = /Total\\s+customs\\s+value/;
-
+  // Decide when to normalize: if the regex source hints we’re parsing steel/alum blocks or their fields
   const needNorm = (re)=>{
     if(!(re instanceof RegExp)) return false;
-    const src = re.source || '';
-    return STEEL_SRC.test(src) || ALUM_SRC.test(src) || WEIGHT_SRC.test(src) || CONTENT_SRC.test(src) || QPCS_SRC.test(src) || CVAL_SRC.test(src);
+    const src = (re.source || '').toLowerCase();
+    return /9903|steel|alum|customs\s+value|quantity\s*per\s*pcs|content\s*per\s*pcs|total\s+net\s+.*weight/.test(src);
   };
 
   const _origMatch = String.prototype.match;
   Object.defineProperty(String.prototype, '__origMatch', { value: _origMatch, configurable: true });
 
   String.prototype.match = function(re){
-    if(needNorm(re)){
-      const norm = normalizeWeirdSpacing(String(this));
-      return _origMatch.call(norm, re);
+    try{
+      if(needNorm(re)){
+        const norm = normalizeWeirdSpacing(String(this));
+        return _origMatch.call(norm, re);
+      }
+      return _origMatch.call(this, re);
+    }catch(e){
+      // Fallback to default behavior if anything goes wrong
+      return _origMatch.call(this, re);
     }
-    return _origMatch.call(this, re);
   };
 })();
 </script>
+
 
 </body>
 </html>
