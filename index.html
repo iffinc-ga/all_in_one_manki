@@ -153,9 +153,6 @@
   let invoiceOrder = [];
   let uploadedPdfName = '';
 
-  // --- focus hint (to preserve keyboard flow across re-renders)
-  let focusHint = null; // { pos: '30', key: 'part_number' } or { pos: '30A', key: 'unit' }
-
   const uploadBox = document.getElementById('uploadBox');
   const fileInput = document.getElementById('fileInput');
   const headerWrap = document.querySelector('.table-header-wrapper');
@@ -206,7 +203,7 @@
       }
 
       if(!fullText.trim()){
-        showAlert('⚠️ The PDF had no extractable text (it may be scanned). Try an OCR’d copy.','error');
+        showAlert('⚠️ The PDF had no extractable text (it may be scanned). Try an OCR'd copy.','error');
         document.getElementById('uploadSection').style.display='block';
         return;
       }
@@ -462,31 +459,6 @@
   // ---- Tab order counter (for better keyboard navigation)
   let _tabCounter = 1;
 
-  // editable keys in natural order
-  const EDIT_KEYS = ['position','part_number','quantity','unit','unit_price','line_total','net_weight','country_of_origin'];
-  function nextKeyOf(k, dir){
-    const i = EDIT_KEYS.indexOf(k);
-    if(i===-1) return 'part_number';
-    const j = i + (dir>0?1:-1);
-    if(j<0) return EDIT_KEYS[0];
-    if(j>=EDIT_KEYS.length) return EDIT_KEYS[EDIT_KEYS.length-1];
-    return EDIT_KEYS[j];
-  }
-
-  function sanitizeId(s){ return String(s||'').replace(/[^A-Za-z0-9_-]/g,'_'); }
-
-  function tryApplyFocusHint(){
-    if(!focusHint || !currentInvoice) return;
-    const posId = sanitizeId(focusHint.pos);
-    const targetId = `cell-${posId}-${focusHint.key}`;
-    const el = document.getElementById(targetId);
-    if(el){
-      el.focus();
-      try{ el.select(); }catch(_){}
-    }
-    focusHint = null;
-  }
-
   function loadInvoiceData(){
     let items = allData.filter(d=>d.invoice_number===currentInvoice);
     if(items.length===0){ const meta={invoice_number:currentInvoice,invoice_date:'',invoice_total:'',supplier:''}; items=[{...meta,position:'',part_number:'',quantity:'',unit:'',unit_price:'',line_total:'',net_weight:'',country_of_origin:''}]; }
@@ -513,56 +485,71 @@
     document.getElementById('tableContainer').style.display='block';
 
     recomputeStats();
-
-    // restore intended focus if any
-    tryApplyFocusHint();
   }
 
   function renderRow(row, idx){
     const tr=document.createElement('tr');
 
-    // --- helper to move focus to next tab-indexed input (fallback for Enter)
+    // --- Helper function to move focus to next or previous editable input
     function focusNext(current){
       const inputs = Array.from(document.querySelectorAll('#tableBody input:not([readonly])'));
       const i = inputs.indexOf(current);
-      if(i>=0 && i<inputs.length-1){ inputs[i+1].focus(); inputs[i+1].select?.(); }
+      if(i>=0 && i<inputs.length-1){ 
+        inputs[i+1].focus(); 
+        inputs[i+1].select?.(); 
+      }
+    }
+
+    function focusPrevious(current){
+      const inputs = Array.from(document.querySelectorAll('#tableBody input:not([readonly])'));
+      const i = inputs.indexOf(current);
+      if(i>0){ 
+        inputs[i-1].focus(); 
+        inputs[i-1].select?.(); 
+      }
     }
 
     function cellInput(val, key, readonly=false){
       const td=document.createElement('td');
       const inp=document.createElement('input');
-      const posId = sanitizeId(row.position);
-      inp.id = `cell-${posId}-${key}`;
       inp.value = (val==null?'':String(val));
       if(readonly) inp.classList.add('readonly');
       inp.readOnly = readonly;
 
-      // ---- Better Tab/Shift+Tab & Enter navigation
+      // ---- Improved Tab/Enter/Shift+Tab navigation
       inp.setAttribute('tabindex', String(_tabCounter++));
-
-      // Enter: commit + move forward
+      
       inp.addEventListener('keydown', (ev)=>{
-        if(ev.key==='Enter'){
+        // Handle Tab key
+        if(ev.key==='Tab' && !ev.shiftKey){
           ev.preventDefault();
+          ev.stopPropagation();
+          // Commit current change first
           if(!readonly) updateCell(idx, key, inp.value);
+          // Move to next field
+          focusNext(inp);
+        }
+        // Handle Shift+Tab key
+        else if(ev.key==='Tab' && ev.shiftKey){
+          ev.preventDefault();
+          ev.stopPropagation();
+          // Commit current change first
+          if(!readonly) updateCell(idx, key, inp.value);
+          // Move to previous field
+          focusPrevious(inp);
+        }
+        // Handle Enter key
+        else if(ev.key==='Enter'){
+          ev.preventDefault();
+          ev.stopPropagation();
+          // Commit current change first
+          if(!readonly) updateCell(idx, key, inp.value);
+          // Move to next field
           focusNext(inp);
         }
       });
 
-      // Tab / Shift+Tab: commit, re-render, restore focus to next/prev field
-      inp.addEventListener('keydown', (ev)=>{
-        if(ev.key === 'Tab' && !readonly){
-          ev.preventDefault();
-          // compute next field within the same row
-          const dir = ev.shiftKey ? -1 : 1;
-          const targetKey = nextKeyOf(key, dir);
-          // set focus hint BEFORE re-render
-          focusHint = { pos: String(row.position||''), key: targetKey };
-          updateCell(idx, key, inp.value);
-        }
-      });
-
-      // Commit on blur/change too (safety)
+      // commit on value change (blur or manual change)
       inp.addEventListener('change',()=>{ updateCell(idx,key,inp.value); });
       td.appendChild(inp); return td;
     }
@@ -601,18 +588,16 @@
     const realIdx = sortedIdxMap[rowIndex];
     const recs = allData.filter(d=>d.invoice_number===currentInvoice);
 
+    // keep previous value for delta computations
     const prevVal = recs[realIdx][key];
+
+    // write the new value
     recs[realIdx][key]=value;
 
-    // If user changed the position value itself and we have a pending focus hint,
-    // update the hint's pos to the new value so we can still find the next cell.
-    if (key === 'position' && focusHint && String(focusHint.pos) === String(prevVal || '')) {
-      focusHint.pos = String(value || '');
-    }
-
-    // Adjust main line when a Steel (S) OR Aluminum (A) subline changes
+    // ---- (2) If a STEEL or ALUMINUM subline's Line Total changes, reduce main line's Item Total by the delta
     if (key === 'line_total') {
       const pos = String(recs[realIdx].position || '');
+      // S = Steel, A = Aluminum
       if (/[SA]$/i.test(pos)) {
         const basePos = pos.replace(/[SA]$/i, '');
         const parent = recs.find(r => String(r.position||'') === basePos);
@@ -641,9 +626,6 @@
     const newRow = { invoice_number:currentInvoice, invoice_date:base.invoice_date, invoice_total:base.invoice_total, supplier:base.supplier, position:insertPos, part_number:'', quantity:'', unit:'', unit_price:'', line_total:'', net_weight:'', country_of_origin:base.country_of_origin };
     const firstIdx = allData.findIndex(d=>d===base);
     allData.splice(firstIdx+1,0,newRow);
-
-    // after inserting, focus POS of the new row
-    focusHint = { pos: insertPos, key: 'position' };
     loadInvoiceData();
   }
 
@@ -663,12 +645,8 @@
     if(!currentInvoice){ showAlert('Select an invoice first','error'); return; }
     const items = allData.filter(d=>d.invoice_number===currentInvoice);
     const meta = items[0]||{};
-    const newPos = ''; // user will type
-    const newRow = { invoice_number:currentInvoice, invoice_date:meta.invoice_date||'', invoice_total:meta.invoice_total||'', supplier:meta.supplier||'', position:newPos, part_number:'', quantity:'', unit:'', unit_price:'', line_total:'', net_weight:'', country_of_origin:meta.country_of_origin||'' };
-    allData.push(newRow);
-    // focus POS immediately
-    focusHint = { pos: newPos, key: 'position' };
-    loadInvoiceData();
+    const newRow = { invoice_number:currentInvoice, invoice_date:meta.invoice_date||'', invoice_total:meta.invoice_total||'', supplier:meta.supplier||'', position:'', part_number:'', quantity:'', unit:'', unit_price:'', line_total:'', net_weight:'', country_of_origin:meta.country_of_origin||'' };
+    allData.push(newRow); loadInvoiceData();
   }
 
   function updateInvoiceField(field, value){
@@ -721,7 +699,7 @@
   }
 
   // ========================================
-  // DB LOAD (GITHUB RAW) & LOOKUPS (unchanged)
+  // DB LOAD (GITHUB RAW) & LOOKUPS
   // ========================================
 
   let mankiDb = null;
@@ -752,375 +730,185 @@
 
     try {
       const response = await fetch(dbUrl);
-      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const arrayBuffer = await response.arrayBuffer();
-      const data = new Uint8Array(arrayBuffer);
-      const workbook = XLSX.read(data, {type:'array'});
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
 
-      if(workbook.SheetNames.includes('UPDATED_MANKI_DB')){
-        mankiDb = XLSX.utils.sheet_to_json(workbook.Sheets['UPDATED_MANKI_DB']);
-      } else throw new Error('UPDATED_MANKI_DB sheet not found');
-
-      if(workbook.SheetNames.includes('manki_hts_codes_with_uom')){
-        htsCodesDb = XLSX.utils.sheet_to_json(workbook.Sheets['manki_hts_codes_with_uom']);
-      } else throw new Error('manki_hts_codes_with_uom sheet not found');
-
-      if(workbook.SheetNames.includes('Sheet1')){
-        steelAlumDb = XLSX.utils.sheet_to_json(workbook.Sheets['Sheet1']);
-      } else throw new Error('Sheet1 not found');
-
-      if(workbook.SheetNames.includes('MID')){
-        supplierMidDb = XLSX.utils.sheet_to_json(workbook.Sheets['MID'], {defval:''});
-        buildSupplierMidIndex();
-      } else {
-        supplierMidDb = [];
-        supplierMidIndex = [];
-        console.warn('[MID] Sheet "MID" not found.');
+      if (workbook.SheetNames.includes('ManufacturerItemMapping')) {
+        const ws = workbook.Sheets['ManufacturerItemMapping'];
+        const data = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        mankiDb = data.map(r => ({
+          mName: (r['Manufacturer Item'] || '').trim().toUpperCase(),
+          our: (r['IFF Part #'] || '').trim(),
+          htc: (r['HS Code'] || '').trim()
+        }));
       }
 
-      document.getElementById('dbStatus').textContent = `Database loaded ✓ (${mankiDb.length} parts, ${htsCodesDb.length} HTS, ${steelAlumDb.length} mappings, ${supplierMidIndex.length} MIDs)`;
+      if (workbook.SheetNames.includes('HTSCodes')) {
+        const ws = workbook.Sheets['HTSCodes'];
+        const data = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        htsCodesDb = data.map(r => ({
+          code: (r['hts_code'] || '').toString().trim(),
+          desc: (r['hts_description'] || '').trim()
+        }));
+      }
+
+      if (workbook.SheetNames.includes('SA')) {
+        const ws = workbook.Sheets['SA'];
+        const data = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        steelAlumDb = data.map(r => ({
+          pn: (r['iff_part_number'] || '').trim().toUpperCase(),
+          hasSteel: (r['steel_flag'] || '').toString().trim().toLowerCase() === 'y',
+          hasAlum: (r['aluminum_flag'] || '').toString().trim().toLowerCase() === 'y'
+        }));
+      }
+
+      if (workbook.SheetNames.includes('MID')) {
+        const ws = workbook.Sheets['MID'];
+        const data = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        supplierMidDb = data.map(r => ({
+          mName: (r['MANUFACTURERNAME'] || '').trim().toUpperCase(),
+          mMID: (r['MANUFACTURERMID'] || '').trim()
+        }));
+        supplierMidIndex = supplierMidDb.map(r => r.mName);
+      }
+
+      let loadedSheets = [];
+      if (mankiDb) loadedSheets.push('ManufacturerItemMapping');
+      if (htsCodesDb) loadedSheets.push('HTSCodes');
+      if (steelAlumDb) loadedSheets.push('SA');
+      if (supplierMidDb) loadedSheets.push('MID');
+
+      document.getElementById('dbStatus').textContent = 'Database loaded!';
       document.getElementById('dbStatus').className = 'db-status db-loaded';
-      document.getElementById('dbInfo').textContent = `Loaded at ${new Date().toLocaleString()}`;
-    } catch(err) {
-      console.error('Database load error:', err);
-      document.getElementById('dbStatus').textContent = 'Database load failed ✗';
+      document.getElementById('dbInfo').textContent = `Loaded: ${loadedSheets.join(', ')} | Total: ${(mankiDb?.length || 0) + (htsCodesDb?.length || 0) + (steelAlumDb?.length || 0) + (supplierMidDb?.length || 0)} records`;
+    } catch (err) {
+      console.error('Failed to load database:', err);
+      document.getElementById('dbStatus').textContent = 'Database load failed';
       document.getElementById('dbStatus').className = 'db-status db-error';
-      document.getElementById('dbInfo').innerHTML = `<strong>Error:</strong> ${err.message}<br><strong>Fix:</strong> Check GITHUB_CONFIG or network.`;
+      document.getElementById('dbInfo').textContent = `Error: ${err.message}`;
     }
   }
 
-  // ===== Helper lookups (unchanged) =====
-  function extractBasePartNumber(fullPartNum){
-    const s = String(fullPartNum || '').trim();
-    const head = s.split('.')[0];
-    const alnum = (head.match(/[A-Za-z0-9]+/)||[''])[0];
-    if (alnum.length >= 5) return alnum.slice(0,5);
-    if (alnum.length === 4) return alnum;
-    const fallback = (s.match(/[A-Za-z0-9]{4,5}/)||[''])[0];
-    return fallback || alnum || '';
+  function lookupManufacturerItem(manufacturerItem) {
+    if (!mankiDb) return null;
+    const key = (manufacturerItem || '').trim().toUpperCase();
+    const hit = mankiDb.find(r => r.mName === key);
+    return hit || null;
   }
 
-  function lookupTariffs(basePartNum){
-    if(!mankiDb) return [];
-    const part = mankiDb.find(row => String(row['PRIMARY PART NUM']) === basePartNum);
-    if(!part) return [];
-    const tariffs = [];
-    for(let i=0; i<=5; i++){
-      const col = i===0 ? 'TARIFF NUM' : `TARIFF NUM_${i}`;
-      if(part[col]){
-        const tariffStr = String(part[col]).replace(/\.0$/, '');
-        tariffs.push(tariffStr);
-      }
-    }
-    return tariffs;
+  function lookupHtsDescription(htsCode) {
+    if (!htsCodesDb) return '';
+    const key = (htsCode || '').toString().trim();
+    const hit = htsCodesDb.find(r => r.code === key);
+    return hit ? hit.desc : '';
   }
 
-  function lookupHtsUom(htsCode){
-    if(!htsCodesDb) return {uom1: '', uom2: ''};
-    const hts = htsCodesDb.find(row => String(row['HTS Code']) === String(htsCode));
-    if(!hts) return {uom1: '', uom2: ''};
-    return { uom1: hts['UOM1'] || '', uom2: hts['UOM2'] || '' };
+  function lookupSteelAlumFlags(ourPart) {
+    if (!steelAlumDb) return { steel: false, alum: false };
+    const key = (ourPart || '').trim().toUpperCase();
+    const hit = steelAlumDb.find(r => r.pn === key);
+    return hit ? { steel: hit.hasSteel, alum: hit.hasAlum } : { steel: false, alum: false };
   }
 
-  function getSteelAlumPartNumber(tariff, type){
-    if(!steelAlumDb) return type === 'Steel' ? 'STEEL GENERIC' : 'ALUM GENERIC';
-    const mapping = steelAlumDb.find(row => String(row['Tariff']).replace(/\.0$/, '') === String(tariff));
-    if(mapping) return type === 'Steel' ? mapping['Steel'] : mapping['Aluminum'];
-    return type === 'Steel' ? 'STEEL GENERIC' : 'ALUM GENERIC';
+  function lookupSupplierMID(manufacturerName) {
+    if (!supplierMidDb) return '';
+    const key = (manufacturerName || '').trim().toUpperCase();
+    const hit = supplierMidDb.find(r => r.mName === key);
+    return hit ? hit.mMID : '';
   }
 
-  // ====== Supplier MID fuzzy lookup (unchanged) ======
-  function stripDiacritics(s){
-    try { return s.normalize('NFKD').replace(/[\u0300-\u036f]/g,''); } catch(_) { return s; }
-  }
-  function normalizeSupplierName(s){
-    return stripDiacritics(String(s||''))
-      .toLowerCase()
-      .replace(/&/g,' and ')
-      .replace(/\b(gmbh|co\.?|kg|llc|inc\.?|ltd\.?|company|coatings|industrie|lackfabrik|the|and|of|factory|fabrik|sa|ag|gebr|geb\.)\b/gi,'')
-      .replace(/[^a-z0-9]+/g,'')
-      .trim();
-  }
-  function onlyConsonants(s){ return String(s||'').replace(/[aeiou]/gi,''); }
-  function diceCoefficient(a,b){
-    if(!a || !b) return 0;
-    if(a === b) return 1;
-    const grams = t => { const r=[]; for(let i=0;i<t.length-1;i++) r.push(t.slice(i,i+2)); return r; };
-    const A=grams(a), B=grams(b);
-    if(!A.length || !B.length) return 0;
-    const map={}; let hit=0;
-    A.forEach(g=>map[g]=(map[g]||0)+1);
-    B.forEach(g=>{ if(map[g]){ hit++; map[g]--; }});
-    return (2*hit)/(A.length+B.length);
-  }
+  function exportToDescartes() {
+    if (!allData.length) { showAlert('No data to export', 'error'); return; }
 
-  let supplierMidDb = null;
-  let supplierMidIndex = [];
-  function buildSupplierMidIndex(){
-    supplierMidIndex = [];
-    if(!Array.isArray(supplierMidDb)) return;
-    supplierMidDb.forEach(row=>{
-      const rawName = String(row['MANUFACTURERNAME'] ?? '').trim();
-      const rawMid  = String(row['MANUFACTURERMID'] ?? '').trim();
-      if(!rawName || !rawMid) return;
-      const norm = normalizeSupplierName(rawName);
-      supplierMidIndex.push({ raw: rawName, norm, cons: onlyConsonants(norm), mid: rawMid });
-    });
-  }
-  function scoreSupplierCandidate(qNorm, qRaw, rec){
-    const exact = qNorm === rec.norm ? 1 : 0;
-    const starts = rec.norm.startsWith(qNorm) ? 0.95 : 0;
-    const contains = rec.norm.includes(qNorm) || qNorm.includes(rec.norm) ? 0.85 : 0;
-    const dice = diceCoefficient(qNorm, rec.norm);
-    const qCons = onlyConsonants(qNorm);
-    const consDice = diceCoefficient(qCons, rec.cons);
-    let shortBoost = 0;
-    if(qNorm.length >= 3 && qNorm.length <= 6){
-      if(rec.norm.includes(qNorm)) shortBoost = 0.25;
-      else if(rec.cons.includes(qCons)) shortBoost = 0.18;
-    }
-    const rawContains = stripDiacritics(rec.raw).toLowerCase().includes(stripDiacritics(qRaw).toLowerCase()) ? 0.2 : 0;
-    return Math.max(exact, starts, contains, dice, consDice) + shortBoost + rawContains;
-  }
-  function lookupSupplierMIDFromText(userSupplierText){
-    if(!userSupplierText) return '';
-    if(!supplierMidIndex.length) return '';
-    const qRaw  = String(userSupplierText||'').trim();
-    const qNorm = normalizeSupplierName(qRaw);
-    if(!qNorm) return '';
-    let best = { score: 0, mid: '' };
-    for(const rec of supplierMidIndex){
-      const s = scoreSupplierCandidate(qNorm, qRaw, rec);
-      if(s > best.score) best = { score: s, mid: rec.mid };
-    }
-    const thresh = (qNorm.length <= 6) ? 0.38 : 0.45;
-    return best.score >= thresh ? best.mid : '';
-  }
+    const desRows = [];
+    const byInv = {};
+    allData.forEach(r => { if (!byInv[r.invoice_number]) byInv[r.invoice_number] = []; byInv[r.invoice_number].push(r); });
 
-  // === Export ALL to Descartes (unchanged logic) ===
-  function exportToDescartes(){
-    if(!mankiDb || !htsCodesDb || !steelAlumDb){
-      showAlert('Database not loaded yet. Please wait for it to load from GitHub.','error');
-      return;
-    }
-    if(!allData.length){ showAlert('No data to export','error'); return; }
-
-    const items = allData.slice().sort((a,b)=>{
-      const ai = String(a.invoice_number||''); const bi = String(b.invoice_number||'');
-      if (ai !== bi) return ai.localeCompare(bi);
-      const A=_parsePos(a.position), B=_parsePos(b.position);
-      if(A.n!==B.n) return A.n-B.n;
-      return _rankSuffix(A.s) - _rankSuffix(B.s);
-    });
-
-    const exportRows = [];
-    const roundWeight = (val) => {
-      const num = parseFloat(val);
-      if (isNaN(num)) return '';
-      if (num < 1) return 1;
-      return Math.round(num);
-    };
-    const currentUiSupplierByInvoice = {};
-    try{
-      const uiSupplier = document.getElementById('statSupplier')?.value || '';
-      const uiInvoice  = document.getElementById('statInvoice')?.textContent || '';
-      if(uiInvoice){ currentUiSupplierByInvoice[uiInvoice] = uiSupplier; }
-    }catch(_){}
-    items.forEach(rec=>{
-      const inv = rec.invoice_number;
-      if(!currentUiSupplierByInvoice[inv]) currentUiSupplierByInvoice[inv] = rec.supplier || '';
-    });
-
-    items.forEach(item => {
-      const isSteelLine = String(item.position||'').endsWith('S') || item.part_number === 'STEEL';
-      const isAlumLine  = String(item.position||'').endsWith('A') || item.part_number === 'ALUMINUM';
-
-      let buyerPartNum, supplierPartNum;
-      if (!isSteelLine && !isAlumLine) {
-        const basePart = extractBasePartNumber(item.part_number);
-        buyerPartNum = basePart;
-        supplierPartNum = basePart;
-      } else {
-        const parentPos = String(item.position||'').replace(/[SA]$/,'');
-        const parentItem = items.find(it => it.invoice_number===item.invoice_number && it.position === parentPos);
-        let tariffForSubline = null;
-        if (parentItem) {
-          const parentBase = extractBasePartNumber(parentItem.part_number);
-          const parentTariffs = lookupTariffs(parentBase);
-          tariffForSubline = parentTariffs.find(t => !String(t).startsWith('98') && !String(t).startsWith('99')) || null;
-        }
-        const subNum = tariffForSubline
-          ? getSteelAlumPartNumber(tariffForSubline, isSteelLine ? 'Steel' : 'Aluminum')
-          : (isSteelLine ? 'STEEL GENERIC' : 'ALUM GENERIC');
-        buyerPartNum = subNum;
-        supplierPartNum = subNum;
-      }
-
-      const supplierForInvoice = currentUiSupplierByInvoice[item.invoice_number] || item.supplier || '';
-      const row = {
-        'InvoiceNumber': item.invoice_number,
-        'InvoiceDate': item.invoice_date,
-        'InvoiceTotal': item.invoice_total,
-        'SupplierMID': lookupSupplierMIDFromText(supplierForInvoice),
-        'SupplierName': supplierForInvoice,
-        'BuyerPartNumber': buyerPartNum,
-        'SupplierPartNumber': supplierPartNum,
-        'Quantity': item.quantity,
-        'UnitOfMeasure': item.unit,
-        'Description': '',
-        'UnitPrice': item.unit_price,
-        'ItemTotal': item.line_total,
-        'CurrencyCode': '',
-        'ExchangeRate': '',
-        'CountryOfOrigin': item.country_of_origin,
-        'CountryOfExport': '',
-        'DateOfExport': '',
-        'PortOfLading': '',
-        'RelatedParty': '',
-        'PO_Number': '',
-        'PO_Date': '',
-        'GrossWeight': '',
-        'GrossWeightUnit': '',
-        'NetWeight': roundWeight(item.net_weight),
-        'TariffNumber': '',
-        'TariffDescription': '',
-        'Quantity1': '',
-        'UnitOfMeasure1': '',
-        'Quantity2': '',
-        'UnitOfMeasure2': '',
-        'Quantity3': '',
-        'UnitOfMeasure3': '',
-        'PrimarySPI': '',
-        'SecondarySPI': '',
-        'DeliverTo': '',
-        'SoldTo': '',
-        'SellerMID': '',
-        'ShipperMID': '',
-        'EntryDate': '',
-        'ArrivalDate': '',
-        'Carrier': '',
-        'Vessel': '',
-        'Voyage': '',
-        'PortOfEntry': '',
-        'PortOfUnloading': '',
-        'LocationCode': '',
-        'TotalCharges': '',
-        'BillOfLadingNumber': '',
-        'Container': '',
-        'SecondaryTariffNumber': '',
-        'SecondaryTariffdescription': '',
-        'Secondary Quantity1': '',
-        'Secondaryunitofmeasure1': '',
-        'secondaryquantity2': '',
-        'secondaryunitofmeasure2': '',
-        'secondaryquantity3': '',
-        'secondaryunitofmeasure3': '',
-        'secondaryvalue': '',
-        'FTZStatus': '',
-        'FTZPrivilegedDate\u00a0': '',
-        'ThirdTariffNumber': '',
-        'ThirdTariffDescription': '',
-        'ThirdTariffQuantity1': '',
-        'ThirdTariffUnitofMeasure1': '',
-        'ThirdTariffQuantity2': '',
-        'ThirdTariffUnitofMeasure2': '',
-        'ThirdTariffQuantity3': '',
-        'ThirdTariffUnitofMeasure3': '',
-        'Third Value': '',
-        '4TariffNumber': '',
-        '4TariffDescription': '',
-        '4TariffQuantity1': '',
-        '4TariffUnitofMeasure1': '',
-        '4TariffQuantity2': '',
-        '4TariffUnitofMeasure2': '',
-        '4TariffQuantity3': '',
-        '4TariffUnitofMeasure3': '',
-        '4 Value': '',
-        '5TariffNumber': '',
-        '5TariffDescription': '',
-        '5TariffQuantity1': '',
-        '5TariffUnitofMeasure1': '',
-        '5TariffQuantity2': '',
-        '5TariffUnitofMeasure2': '',
-        '5TariffQuantity3': '',
-        '5TariffUnitofMeasure3': '',
-        '5 Value': ''
-      };
-
-      if (isSteelLine || isAlumLine) {
-        row['NetWeight'] = roundWeight(item.quantity);
-      }
-
-      const basePartNum = extractBasePartNumber(item.part_number);
-      const tariffs = lookupTariffs(basePartNum);
-      const tariffFields = ['TariffNumber', 'SecondaryTariffNumber', 'ThirdTariffNumber', '4TariffNumber', '5TariffNumber'];
-
-      tariffs.forEach((tariff, idx) => {
-        if(idx < tariffFields.length){
-          row[tariffFields[idx]] = tariff;
-          const startsWithExempt = String(tariff).startsWith('98') || String(tariff).startsWith('99');
-          if(!startsWithExempt){
-            const uomInfo = lookupHtsUom(tariff);
-            if(idx === 0){
-              row['Quantity1'] = roundWeight(item.net_weight);
-              row['UnitOfMeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){ row['Quantity2'] = roundWeight(item.net_weight); row['UnitOfMeasure2'] = uomInfo.uom2; }
-            } else if(idx === 1){
-              row['Secondary Quantity1'] = roundWeight(item.net_weight);
-              row['Secondaryunitofmeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){ row['secondaryquantity2'] = roundWeight(item.net_weight); row['secondaryunitofmeasure2'] = uomInfo.uom2; }
-            } else if(idx === 2){
-              row['ThirdTariffQuantity1'] = roundWeight(item.net_weight);
-              row['ThirdTariffUnitofMeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){ row['ThirdTariffQuantity2'] = roundWeight(item.net_weight); row['ThirdTariffUnitofMeasure2'] = uomInfo.uom2; }
-            } else if(idx === 3){
-              row['4TariffQuantity1'] = roundWeight(item.net_weight);
-              row['4TariffUnitofMeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){ row['4TariffQuantity2'] = roundWeight(item.net_weight); row['4TariffUnitofMeasure2'] = uomInfo.uom2; }
-            } else if(idx === 4){
-              row['5TariffQuantity1'] = roundWeight(item.net_weight);
-              row['5TariffUnitofMeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){ row['5TariffQuantity2'] = roundWeight(item.net_weight); row['5TariffUnitofMeasure2'] = uomInfo.uom2; }
-            }
-          }
-        }
+    Object.keys(byInv).forEach(inv => {
+      const rows = byInv[inv].slice().sort((a, b) => {
+        const A = _parsePos(a.position), B = _parsePos(b.position);
+        if (A.n !== B.n) return A.n - B.n;
+        return _rankSuffix(A.s) - _rankSuffix(B.s);
       });
 
-      if (isSteelLine) {
-        row['TariffNumber'] = '99030133';
-        row['SecondaryTariffNumber'] = '99038191';
-        row['Secondary Quantity1'] = roundWeight(item.quantity);
-        row['Secondaryunitofmeasure1'] = 'KG';
-      }
+      rows.forEach(r => {
+        const mfgItem = (r.part_number || '').trim();
+        const lookup = lookupManufacturerItem(mfgItem);
+        const ourPart = lookup ? lookup.our : '';
+        const htcCode = lookup ? lookup.htc : '';
+        const htcDesc = htcCode ? lookupHtsDescription(htcCode) : '';
+        const supplierMID = lookupSupplierMID(r.supplier || '');
 
-      if (isAlumLine) {
-        row['TariffNumber'] = '99030133';
-        row['SecondaryTariffNumber'] = '99038508';
-        row['Secondary Quantity1'] = roundWeight(item.quantity);
-        row['Secondaryunitofmeasure1'] = 'KG';
-      }
+        const qtyVal = parseFloat(String(r.quantity || '').replace(/,/g, ''));
+        const isQtyValid = !isNaN(qtyVal);
+        const qty = isQtyValid ? qtyVal : '';
 
-      exportRows.push(row);
+        const upVal = parseFloat(String(r.unit_price || '').replace(/,/g, ''));
+        const isUpValid = !isNaN(upVal);
+        const uprice = isUpValid ? upVal.toFixed(4) : '';
+
+        const ltVal = parseFloat(String(r.line_total || '').replace(/,/g, ''));
+        const isLtValid = !isNaN(ltVal);
+        const lineTot = isLtValid ? ltVal.toFixed(2) : '';
+
+        const { steel, alum } = lookupSteelAlumFlags(ourPart);
+
+        desRows.push({
+          'Supplier Name': r.supplier || '',
+          'Supplier Address': '',
+          'Supplier City': '',
+          'Supplier State Code': '',
+          'Supplier Zip Code': '',
+          'Supplier Country Code': '',
+          'Importer Number': '',
+          'Ship To Location Code': '',
+          'Consignee Name': '',
+          'Consignee Address': '',
+          'Consignee City': '',
+          'Consignee State Code': '',
+          'Consignee Zip Code': '',
+          'Consignee Country Code': '',
+          'Invoice Number': r.invoice_number || '',
+          'Invoice Date': r.invoice_date || '',
+          'Manufacturer Name': r.supplier || '',
+          'Manufacturer ID': supplierMID,
+          'Manufacturer Item Number': mfgItem,
+          'IFF Part Number': ourPart,
+          'Item Description': htcDesc,
+          'Quantity': qty,
+          'Unit of Measure': r.unit || '',
+          'Unit Price (USD)': uprice,
+          'Line Total (USD)': lineTot,
+          'Net Weight (kg)': r.net_weight || '',
+          'Country of Origin': r.country_of_origin || '',
+          'HTS Code': htcCode,
+          'Steel (Y/N)': steel ? 'Y' : '',
+          'Aluminum (Y/N)': alum ? 'Y' : ''
+        });
+      });
     });
 
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(exportRows);
-    XLSX.utils.book_append_sheet(wb, ws, 'Descartes Export');
+    if (!desRows.length) { showAlert('No rows to export to Descartes', 'error'); return; }
 
-    const out = XLSX.write(wb, {type:'array', bookType:'xlsx'});
-    const blob = new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(desRows);
+    XLSX.utils.book_append_sheet(wb, ws, 'Descartes');
+    const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = (uploadedPdfName?uploadedPdfName+'_':'')+'descartes_export.xlsx';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    a.download = (uploadedPdfName ? uploadedPdfName + '_' : '') + 'DescartesFinalTemplate.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
-
     showAlert('Descartes template exported successfully!', 'success');
   }
 </script>
 
-<!-- ===== Runtime normalization helpers (unchanged) ===== -->
+<!-- ===== Runtime normalization helpers (for weird spacing in PDFs) ===== -->
 <script>
 (function(){
   function normalizeWeirdSpacing(s){
@@ -1173,7 +961,7 @@
 })();
 </script>
 
-<!-- === Steel-first ordering (unchanged) === -->
+<!-- === Steel-first ordering for both UI and export (no UI changes) === -->
 <script>
 (function(){
   function _rowInfo(row){
