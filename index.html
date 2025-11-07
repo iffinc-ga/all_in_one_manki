@@ -471,7 +471,8 @@
     select.innerHTML='<option value="">Select an invoice...</option>';
     const invoices={};
     allData.forEach(item=>{ if(!invoices[item.invoice_number]){ invoices[item.invoice_number]={date:item.invoice_date,supplier:item.supplier,total:item.invoice_total,itemCount:0}; } invoices[item.invoice_number].itemCount++; });
-    invoiceOrder = Object.keys(invoices);
+    // Keep invoiceOrder as-is (already populated in PDF order during parsing)
+    // Don't overwrite with Object.keys(invoices) which loses the original order
     invoiceOrder.forEach(num=>{ const inv = invoices[num] || {date:'',supplier:'',total:0,itemCount:0}; const total=parseFloat(inv.total||0).toLocaleString('en-US',{minimumFractionDigits:2}); const opt=document.createElement('option'); opt.value=num; opt.textContent=`Invoice ${num} (${inv.itemCount} items) - ${inv.date} - ${inv.supplier} - $${total}`; select.appendChild(opt); });
     document.getElementById('controls').style.display='block';
     select.addEventListener('change', function(){ currentInvoice=this.value; if(currentInvoice) loadInvoiceData(); else hideDataView(); });
