@@ -813,7 +813,7 @@
         'PO_Date': '',
         'GrossWeight': '',
         'GrossWeightUnit': '',
-        'NetWeight': item.net_weight,
+        'NetWeight': Math.round(item.net_weight),
         'TariffNumber': '',
         'TariffDescription': '',
         'Quantity1': '',
@@ -881,7 +881,7 @@
 
       // For S/A sublines: mirror displayed Quantity into NetWeight as requested
       if (isSteelLine || isAlumLine) {
-        row['NetWeight'] = item.quantity;
+        row['NetWeight'] = Math.round(item.quantity);
       }
 
       const basePartNum = extractBasePartNumber(item.part_number);
@@ -895,25 +895,25 @@
           if(!startsWithExempt){
             const uomInfo = lookupHtsUom(tariff);
             if(idx === 0){
-              row['Quantity1'] = item.net_weight;
+              row['Quantity1'] = Math.round(item.net_weight);
               row['UnitOfMeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){ row['Quantity2'] = item.net_weight; row['UnitOfMeasure2'] = uomInfo.uom2; }
+              if(uomInfo.uom2){ row['Quantity2'] = Math.round(item.net_weight); row['UnitOfMeasure2'] = uomInfo.uom2; }
             } else if(idx === 1){
-              row['Secondary Quantity1'] = item.net_weight;
+              row['Secondary Quantity1'] = Math.round(item.net_weight);
               row['Secondaryunitofmeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){ row['secondaryquantity2'] = item.net_weight; row['secondaryunitofmeasure2'] = uomInfo.uom2; }
+              if(uomInfo.uom2){ row['secondaryquantity2'] = Math.round(item.net_weight); row['secondaryunitofmeasure2'] = uomInfo.uom2; }
             } else if(idx === 2){
-              row['ThirdTariffQuantity1'] = item.net_weight;
+              row['ThirdTariffQuantity1'] = Math.round(item.net_weight);
               row['ThirdTariffUnitofMeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){ row['ThirdTariffQuantity2'] = item.net_weight; row['ThirdTariffUnitofMeasure2'] = uomInfo.uom2; }
+              if(uomInfo.uom2){ row['ThirdTariffQuantity2'] = Math.round(item.net_weight); row['ThirdTariffUnitofMeasure2'] = uomInfo.uom2; }
             } else if(idx === 3){
-              row['4TariffQuantity1'] = item.net_weight;
+              row['4TariffQuantity1'] = Math.round(item.net_weight);
               row['4TariffUnitofMeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){ row['4TariffQuantity2'] = item.net_weight; row['4TariffUnitofMeasure2'] = uomInfo.uom2; }
+              if(uomInfo.uom2){ row['4TariffQuantity2'] = Math.round(item.net_weight); row['4TariffUnitofMeasure2'] = uomInfo.uom2; }
             } else if(idx === 4){
-              row['5TariffQuantity1'] = item.net_weight;
+              row['5TariffQuantity1'] = Math.round(item.net_weight);
               row['5TariffUnitofMeasure1'] = uomInfo.uom1;
-              if(uomInfo.uom2){ row['5TariffQuantity2'] = item.net_weight; row['5TariffUnitofMeasure2'] = uomInfo.uom2; }
+              if(uomInfo.uom2){ row['5TariffQuantity2'] = Math.round(item.net_weight); row['5TariffUnitofMeasure2'] = uomInfo.uom2; }
             }
           }
         }
@@ -923,7 +923,7 @@
       if (isSteelLine) {
         row['TariffNumber'] = '99030133';
         row['SecondaryTariffNumber'] = '99038191';
-        row['Secondary Quantity1'] = item.quantity;
+        row['Secondary Quantity1'] = Math.round(item.quantity);
         row['Secondaryunitofmeasure1'] = 'KG';
       }
 
@@ -931,7 +931,7 @@
       if (isAlumLine) {
         row['TariffNumber'] = '99030133';
         row['SecondaryTariffNumber'] = '99038508';
-        row['Secondary Quantity1'] = item.quantity;
+        row['Secondary Quantity1'] = Math.round(item.quantity);
         row['Secondaryunitofmeasure1'] = 'KG';
       }
 
