@@ -927,6 +927,14 @@
         row['Secondaryunitofmeasure1'] = 'KG';
       }
 
+      // For aluminum lines: add specific tariff and quantity data
+      if (isAlumLine) {
+        row['TariffNumber'] = '99030133';
+        row['SecondaryTariffNumber'] = '99038508';
+        row['Secondary Quantity1'] = item.quantity;
+        row['Secondaryunitofmeasure1'] = 'KG';
+      }
+
       exportRows.push(row);
     });
 
