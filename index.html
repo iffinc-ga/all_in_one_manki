@@ -166,8 +166,9 @@
   let supplierMidDb = null;
   let supplierMidIndex = [];
 
-  // focus hint for keyboard navigation across re-renders
+  // focus hint + suppression to avoid double re-render stealing focus
   let focusHint = null;
+  let suppressChangeOnce = false;
 
   const uploadBox = document.getElementById('uploadBox');
   const fileInput = document.getElementById('fileInput');
@@ -224,7 +225,6 @@
         return;
       }
 
-      // >>> This is the function that was missing if you saw "parseinvoice not defined"
       parseInvoices(fullText);
 
       if(allData.length>0){
@@ -529,12 +529,6 @@
   function renderRow(row, idx){
     const tr=document.createElement('tr');
 
-    function focusNext(current){
-      const inputs = Array.from(document.querySelectorAll('#tableBody input:not([readonly])'));
-      const i = inputs.indexOf(current);
-      if(i>=0 && i<inputs.length-1){ inputs[i+1].focus(); inputs[i+1].select?.(); }
-    }
-
     function cellInput(val, key, readonly=false){
       const td=document.createElement('td');
       const inp=document.createElement('input');
@@ -546,17 +540,22 @@
 
       inp.setAttribute('tabindex', String(_tabCounter++));
 
+      // ENTER: commit & focus next via re-render (suppress blur-change)
       inp.addEventListener('keydown', (ev)=>{
-        if(ev.key==='Enter'){
+        if(ev.key==='Enter' && !readonly){
           ev.preventDefault();
-          if(!readonly) updateCell(idx, key, inp.value);
-          focusNext(inp);
+          suppressChangeOnce = true; // avoid double update on ensuing blur/change
+          const targetKey = nextKeyOf(key, +1);
+          focusHint = { pos: String(row.position||''), key: targetKey };
+          updateCell(idx, key, inp.value);
         }
       });
 
+      // TAB / SHIFT+TAB: commit & move via re-render (suppress blur-change)
       inp.addEventListener('keydown', (ev)=>{
         if(ev.key === 'Tab' && !readonly){
           ev.preventDefault();
+          suppressChangeOnce = true; // ignore the immediate blur/change fired by Tab
           const dir = ev.shiftKey ? -1 : 1;
           const targetKey = nextKeyOf(key, dir);
           focusHint = { pos: String(row.position||''), key: targetKey };
@@ -564,7 +563,12 @@
         }
       });
 
-      inp.addEventListener('change',()=>{ updateCell(idx,key,inp.value); });
+      // Change (fires on blur). If we just handled Enter/Tab, skip once.
+      inp.addEventListener('change',()=>{
+        if(suppressChangeOnce){ suppressChangeOnce=false; return; }
+        if(!readonly) updateCell(idx,key,inp.value);
+      });
+
       td.appendChild(inp); return td;
     }
 
@@ -1247,8 +1251,7 @@
     try{
       const wb = await fetchAndReadWorkbook(remoteUrl, true);
       await hydrateDbsFromWorkbook(wb);
-      setDbBanner('loaded', 'Database loaded ✓',
-        `Loaded from GitHub at ${new Date().toLocaleString()}`);
+      setDbBanner('loaded', 'Database loaded ✓', `Loaded from GitHub at ${new Date().toLocaleString()}`);
       return;
     }catch(err1){
       console.warn('[DB] GitHub load failed:', err1?.message || err1);
@@ -1256,8 +1259,7 @@
       try{
         const wb2 = await fetchAndReadWorkbook(localUrl, false);
         await hydrateDbsFromWorkbook(wb2);
-        setDbBanner('loaded','Database loaded ✓ (local fallback)',
-          `Loaded from local file at ${new Date().toLocaleString()}`);
+        setDbBanner('loaded','Database loaded ✓ (local fallback)', `Loaded from local file at ${new Date().toLocaleString()}`);
         return;
       }catch(err2){
         console.warn('[DB] Local fallback failed:', err2?.message || err2);
