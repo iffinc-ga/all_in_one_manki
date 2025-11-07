@@ -1,639 +1,1200 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mankiewicz Invoice Processor</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Invoice PDF Parser & Editor — Steel/Aluminum Sublines</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:Arial, sans-serif;background:#f5f7fa;padding:20px}
+    .container{max-width:1800px;margin:0 auto;background:#fff;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.1)}
+    .header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:30px;border-radius:8px 8px 0 0}
+    .header h1{margin-bottom:8px}
+    .upload-section{padding:40px;text-align:center}
+    .upload-box{border:3px dashed #cbd5e0;border-radius:8px;padding:40px;cursor:pointer;transition:.3s}
+    .upload-box:hover{border-color:#667eea;background:#f7fafc}
+    .upload-box.dragover{border-color:#667eea;background:#e6f0ff}
+    #fileInput{display:none}
+    .loading{padding:40px;text-align:center;display:none}
+    .spinner{border:4px solid #f3f3f3;border-top:4px solid #667eea;border-radius:50%;width:50px;height:50px;animation:spin 1s linear infinite;margin:0 auto 20px}
+    @keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+    .controls{padding:20px;background:#f8f9fa;border-bottom:1px solid #dee2e6;display:none}
+    .controls select{padding:10px;border:1px solid #ced4da;border-radius:4px;font-size:14px;min-width:400px;margin-right:10px}
+    .controls button{padding:10px 20px;border:none;border-radius:4px;font-weight:600;cursor:pointer;margin-right:10px}
+    .btn-success{background:#28a745;color:#fff}.btn-success:hover{background:#218838}
+    .btn-primary{background:#007bff;color:#fff}.btn-primary:hover{background:#0056b3}
+    .btn-danger{background:#dc3545;color:#fff}.btn-danger:hover{background:#c82333}
+    .btn-info{background:#17a2b8;color:#fff}.btn-info:hover{background:#138496}
+    .stats{padding:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:15px;background:#fff3cd;display:none}
+    .stat{padding:15px;background:#fff;border-radius:4px;border-left:4px solid #ffc107}
+    .stat-label{font-size:11px;color:#6c757d;text-transform:uppercase;margin-bottom:5px}
+    .stat-value{font-size:20px;font-weight:700}
+    .stat-value.error{color:#dc3545}.stat-value.success{color:#28a745}
+    .stat input{width:100%;padding:6px;border:1px solid #ced4da;border-radius:3px;font-size:16px;font-weight:bold}
+    .stat.editable{border-left-color:#007bff}
+    .table-container{padding:20px;display:none}
+    .table-header-wrapper{background:#343a40;overflow:auto}
+    .table-header-wrapper::-webkit-scrollbar{display:none}
+    .table-header-wrapper{scrollbar-width:none}
+    .table-header{min-width:1200px}
+    .table-header table{width:100%;border-collapse:collapse}
+    .table-header th{background:#343a40;color:#fff;padding:12px 8px;text-align:left;font-weight:600;font-size:13px;border:none}
+    .table-body-wrapper{max-height:560px;overflow:auto}
+    .table-body{min-width:1200px}
+    .table-body table{width:100%;border-collapse:collapse}
+    .table-body td{padding:10px 8px;border-bottom:1px solid #dee2e6;background:#fff}
+    .table-body tr:hover td{background:#f8f9fa}
+    .table-body td input{width:100%;padding:6px;border:1px solid #ced4da;border-radius:3px;font-size:13px}
+    .table-body td input:focus{outline:none;border-color:#667eea}
+    .readonly{background:#e9ecef!important}
+    .actions{text-align:center}
+    .actions button{padding:4px 8px;font-size:12px;margin:0 2px}
+    .inline-help{font-size:12px;color:#6c757d;margin-left:8px}
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
+    .db-section{padding:20px;background:#e7f3ff;border-bottom:1px solid #b3d9ff}
+    .db-status{display:inline-block;padding:5px 10px;border-radius:4px;font-size:12px;margin-left:10px}
+    .db-loaded{background:#d4edda;color:#155724}
+    .db-loading{background:#fff3cd;color:#856404}
+    .db-error{background:#f8d7da;color:#721c24}
+    .db-info{font-size:12px;color:#004085;margin-top:5px}
 
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            overflow: hidden;
-        }
-
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            text-align: center;
-        }
-
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-            font-weight: 700;
-        }
-
-        .header p {
-            font-size: 1.1em;
-            opacity: 0.9;
-        }
-
-        .content {
-            padding: 40px;
-        }
-
-        .upload-section {
-            background: #f8f9fa;
-            border: 3px dashed #667eea;
-            border-radius: 15px;
-            padding: 50px;
-            text-align: center;
-            margin-bottom: 30px;
-            transition: all 0.3s ease;
-        }
-
-        .upload-section:hover {
-            border-color: #764ba2;
-            background: #f0f1f3;
-        }
-
-        .upload-section.dragover {
-            background: #e7e9fc;
-            border-color: #764ba2;
-            transform: scale(1.02);
-        }
-
-        input[type="file"] {
-            display: none;
-        }
-
-        .upload-label {
-            display: inline-block;
-            padding: 15px 40px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-radius: 50px;
-            cursor: pointer;
-            font-size: 1.1em;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-        }
-
-        .upload-label:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
-        }
-
-        .file-info {
-            margin-top: 20px;
-            font-size: 0.95em;
-            color: #666;
-        }
-
-        .btn {
-            padding: 12px 30px;
-            margin: 10px;
-            border: none;
-            border-radius: 25px;
-            font-size: 1em;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        }
-
-        .btn-process {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-
-        .btn-process:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
-        }
-
-        .btn-download {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            color: white;
-        }
-
-        .btn-download:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(245, 87, 108, 0.4);
-        }
-
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .results-section {
-            margin-top: 30px;
-        }
-
-        .invoice-card {
-            background: white;
-            border: 2px solid #e0e0e0;
-            border-radius: 15px;
-            padding: 25px;
-            margin-bottom: 25px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.07);
-            transition: all 0.3s ease;
-        }
-
-        .invoice-card:hover {
-            box-shadow: 0 8px 15px rgba(0,0,0,0.1);
-            transform: translateY(-2px);
-        }
-
-        .invoice-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 2px solid #f0f0f0;
-        }
-
-        .invoice-number {
-            font-size: 1.5em;
-            font-weight: 700;
-            color: #667eea;
-        }
-
-        .invoice-date {
-            color: #666;
-            font-size: 0.95em;
-        }
-
-        .invoice-total {
-            font-size: 1.8em;
-            font-weight: 700;
-            color: #764ba2;
-            text-align: right;
-        }
-
-        .table-container {
-            overflow-x: auto;
-            border-radius: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background: white;
-        }
-
-        thead {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-
-        th {
-            padding: 15px;
-            text-align: left;
-            font-weight: 600;
-            font-size: 0.9em;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        td {
-            padding: 15px;
-            border-bottom: 1px solid #f0f0f0;
-        }
-
-        tbody tr {
-            transition: background-color 0.2s ease;
-        }
-
-        tbody tr:hover {
-            background-color: #f8f9ff;
-        }
-
-        .text-right {
-            text-align: right;
-        }
-
-        .text-center {
-            text-align: center;
-        }
-
-        .summary-section {
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            padding: 25px;
-            border-radius: 15px;
-            margin-top: 30px;
-        }
-
-        .summary-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 12px 0;
-            font-size: 1.1em;
-        }
-
-        .summary-row.total {
-            border-top: 3px solid #667eea;
-            margin-top: 15px;
-            padding-top: 15px;
-            font-weight: 700;
-            font-size: 1.4em;
-            color: #764ba2;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 40px;
-            font-size: 1.2em;
-            color: #667eea;
-        }
-
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .error {
-            background: #fee;
-            border: 2px solid #fcc;
-            color: #c33;
-            padding: 15px;
-            border-radius: 10px;
-            margin: 20px 0;
-        }
-
-        .success {
-            background: #efe;
-            border: 2px solid #cfc;
-            color: #3c3;
-            padding: 15px;
-            border-radius: 10px;
-            margin: 20px 0;
-        }
-
-        @media (max-width: 768px) {
-            .header h1 {
-                font-size: 1.8em;
-            }
-
-            .content {
-                padding: 20px;
-            }
-
-            .upload-section {
-                padding: 30px 20px;
-            }
-
-            table {
-                font-size: 0.9em;
-            }
-
-            th, td {
-                padding: 10px 8px;
-            }
-        }
-    </style>
+    .table-header table, .table-body table{table-layout:fixed}
+    .table-header th:nth-child(1), .table-body td:nth-child(1){width:44px!important}
+    .table-header th:nth-child(2), .table-body td:nth-child(2){width:210px!important}
+    .table-header th:nth-child(3), .table-body td:nth-child(3){width:80px!important}
+    .table-header th:nth-child(4), .table-body td:nth-child(4){width:56px!important}
+    .table-header th:nth-child(5), .table-body td:nth-child(5){width:120px!important}
+    .table-header th:nth-child(6), .table-body td:nth-child(6){width:120px!important}
+    .table-header th:nth-child(7), .table-body td:nth-child(7){width:96px!important}
+    .table-header th:nth-child(8), .table-body td:nth-child(8){width:80px!important}
+    .table-header th:nth-child(9), .table-body td:nth-child(9){width:140px!important}
+    .table-body td{padding:6px 6px}
+    .table-body td input{width:100%;}
+  </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>📊 Mankiewicz Invoice Processor</h1>
-            <p>Upload PDF invoices to extract and process data</p>
-        </div>
+<div class="container">
+  <div class="header">
+    <h1>📄 Invoice PDF Parser & Editor</h1>
+    <p>Steel/Aluminum sublines below each main line. Export-ready.</p>
+  </div>
 
-        <div class="content">
-            <div class="upload-section" id="uploadSection">
-                <label for="pdfFile" class="upload-label">
-                    📁 Choose PDF File
-                </label>
-                <input type="file" id="pdfFile" accept=".pdf" multiple>
-                <div class="file-info" id="fileInfo">No file selected</div>
-            </div>
+  <div class="db-section" id="dbSection">
+    <strong>Database Status:</strong>
+    <span class="db-status db-loading" id="dbStatus">Loading database from repository...</span>
+    <div class="db-info" id="dbInfo">Fetching updated_manki_db.xlsx...</div>
+  </div>
 
-            <div style="text-align: center;">
-                <button class="btn btn-process" id="processBtn" disabled>
-                    🔄 Process Invoices
-                </button>
-                <button class="btn btn-download" id="downloadBtn" style="display:none;">
-                    💾 Download Excel
-                </button>
-            </div>
-
-            <div id="results"></div>
-        </div>
+  <div class="upload-section" id="uploadSection">
+    <div class="upload-box" id="uploadBox">
+      <h2>📤 Upload PDF Invoice</h2>
+      <p style="margin-top:10px;color:#6c757d">Click or drag & drop your PDF file here</p>
+      <input type="file" id="fileInput" accept=".pdf,application/pdf" />
     </div>
+  </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    
-    <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    <div><strong>Processing PDF...</strong></div>
+  </div>
 
-        let selectedFiles = [];
-        let processedData = [];
+  <div class="alert" id="alert" style="display:none"></div>
 
-        const uploadSection = document.getElementById('uploadSection');
-        const fileInput = document.getElementById('pdfFile');
-        const fileInfo = document.getElementById('fileInfo');
-        const processBtn = document.getElementById('processBtn');
-        const downloadBtn = document.getElementById('downloadBtn');
-        const results = document.getElementById('results');
+  <div class="controls" id="controls">
+    <select id="invoiceSelect"><option value="">Select an invoice...</option></select>
+    <button class="btn-warning" onclick="exportToDescartes()">📋 Export to Descartes Template (All Invoices)</button>
+    <button class="btn-success" onclick="exportToExcel()">📥 Export All to Excel</button>
+    <button class="btn-info" onclick="addBlankRowForCurrent()">➕ Add Blank Row</button>
+    <button class="btn-primary" onclick="resetUpload()">📤 New Upload</button>
+    <span class="inline-help">Tip: Edit <strong>Supplier</strong> before export; SupplierMID will be looked up from the MID sheet.</span>
+  </div>
 
-        // Drag and drop handlers
-        uploadSection.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadSection.classList.add('dragover');
+  <div class="stats" id="stats">
+    <div class="stat"><div class="stat-label">Invoice Number</div><div class="stat-value" id="statInvoice">-</div></div>
+    <div class="stat editable"><div class="stat-label">Invoice Date (Editable)</div><input autocomplete="off" type="text" id="statDate" placeholder="MM/DD/YYYY" onchange="updateInvoiceField('invoice_date', this.value)"></div>
+    <div class="stat editable"><div class="stat-label">Supplier (Editable)</div><input autocomplete="off" type="text" id="statSupplier" placeholder="Supplier name" onchange="updateInvoiceField('supplier', this.value)"></div>
+    <div class="stat"><div class="stat-label">Total Line Items</div><div class="stat-value" id="statItems">0</div></div>
+    <div class="stat editable"><div class="stat-label">Invoice Total (Editable)</div><input autocomplete="off" type="number" step="0.01" id="statTotal" placeholder="0.00" onchange="updateInvoiceTotal(this.value)"></div>
+    <div class="stat"><div class="stat-label">Line Items Sum</div><div class="stat-value" id="statSum">$0.00</div></div>
+    <div class="stat"><div class="stat-label">Difference</div><div class="stat-value" id="statDiff">$0.00</div></div>
+  </div>
+
+  <div class="table-container" id="tableContainer">
+    <div class="table-header-wrapper">
+      <div class="table-header">
+        <table><thead><tr>
+          <th style="width:48px">Pos</th>
+          <th style="width:210px">Part Number</th>
+          <th style="width:90px">Quantity</th>
+          <th style="width:64px">Unit</th>
+          <th style="width:120px">Unit Price</th>
+          <th style="width:120px">Line Total</th>
+          <th style="width:120px">Net Weight</th>
+          <th style="width:80px">Country</th>
+          <th style="width:140px">Actions</th>
+        </tr></thead></table>
+      </div>
+    </div>
+    <div class="table-body-wrapper">
+      <div class="table-body">
+        <table><tbody id="tableBody"></tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  let allData = [];
+  let currentInvoice = '';
+  let invoiceOrder = [];
+  let uploadedPdfName = '';
+
+  const uploadBox = document.getElementById('uploadBox');
+  const fileInput = document.getElementById('fileInput');
+  const headerWrap = document.querySelector('.table-header-wrapper');
+  const bodyWrap = document.querySelector('.table-body-wrapper');
+  if(headerWrap && bodyWrap){
+    let syncing=false;
+    bodyWrap.addEventListener('scroll',()=>{ if(syncing) return; syncing=true; headerWrap.scrollLeft = bodyWrap.scrollLeft; syncing=false; });
+    headerWrap.addEventListener('scroll',()=>{ if(syncing) return; syncing=true; bodyWrap.scrollLeft = headerWrap.scrollLeft; syncing=false; });
+  }
+
+  uploadBox.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) handleFile(f); });
+  uploadBox.addEventListener('dragover', e => { e.preventDefault(); uploadBox.classList.add('dragover'); });
+  uploadBox.addEventListener('dragleave', () => uploadBox.classList.remove('dragover'));
+  uploadBox.addEventListener('drop', e => { e.preventDefault(); uploadBox.classList.remove('dragover'); const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) handleFile(f); });
+
+  function isPdfFile(file){ const nameOk=(file.name||'').toLowerCase().endsWith('.pdf'); const typeOk=(file.type||'').toLowerCase()==='application/pdf'; return nameOk || typeOk; }
+
+  function showAlert(msg,type='success'){
+    const el=document.getElementById('alert'); el.textContent=msg; el.style.display='block';
+    el.style.background = type==='error'?'#f8d7da':'#d4edda';
+    el.style.color = type==='error'?'#721c24':'#155724';
+    el.style.border = type==='error'?'1px solid #f5c6cb':'1px solid #c3e6cb';
+    setTimeout(()=>{ el.style.display='none'; }, 4000);
+  }
+
+  async function handleFile(file){
+    if(!isPdfFile(file)){ showAlert('Please upload a PDF file','error'); return; }
+    uploadedPdfName = (file.name||'').replace(/\.pdf$/i,'');
+
+    document.getElementById('uploadSection').style.display='none';
+    document.getElementById('loading').style.display='block';
+
+    try{
+      const arrayBuffer = await file.arrayBuffer();
+      const uint8 = new Uint8Array(arrayBuffer);
+      const pdf = await pdfjsLib.getDocument({data:uint8}).promise;
+
+      let fullText='';
+      for(let i=1;i<=pdf.numPages;i++){
+        try{
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent({includeMarkedContent:true});
+          const items = (textContent && Array.isArray(textContent.items))? textContent.items:[];
+          const pageText = items.map(it=> (it && typeof it.str==='string') ? it.str : '').join(' ');
+          fullText += (pageText||'') + '\n';
+        }catch(perPageErr){ console.warn('Failed to read page',i,perPageErr); }
+      }
+
+      if(!fullText.trim()){
+        showAlert('⚠️ The PDF had no extractable text (it may be scanned). Try an OCR’d copy.','error');
+        document.getElementById('uploadSection').style.display='block';
+        return;
+      }
+
+      parseInvoices(fullText);
+
+      if(allData.length>0){
+        const invoiceCount = new Set(allData.map(d=>d.invoice_number)).size;
+        showAlert(`✅ Found ${invoiceCount} invoice(s) with ${allData.length} line items`,'success');
+        setupInterface();
+      }else{
+        showAlert('⚠️ No invoice data found in PDF.','error');
+        document.getElementById('uploadSection').style.display='block';
+      }
+    }catch(err){
+      console.error('PDF processing error:',err); showAlert('Error: '+(err.message||String(err)),'error');
+      document.getElementById('uploadSection').style.display='block';
+    }finally{
+      document.getElementById('loading').style.display='none';
+    }
+  }
+
+  function parseFloatSafe(s){ if(s==null) return NaN; const t=String(s).replace(/[\,\s]/g,''); const v=parseFloat(t); return isNaN(v)?NaN:v; }
+  function fmt2(n){ const v=parseFloatSafe(n); return isNaN(v)?'':v.toFixed(2); }
+
+  function parseInvoices(text){
+    allData=[]; invoiceOrder=[]; text = String(text||'');
+
+    const splits = text.split(/Customs\s+Invoice\s+(\d+)\s+from/gi);
+    const invoiceGroups = {};
+
+    for(let i=1;i<splits.length;i+=2){
+      const invoiceNum = splits[i]; const sectionText = splits[i+1];
+      if(!invoiceNum || !sectionText) continue;
+      if(!invoiceGroups[invoiceNum]){ invoiceOrder.push(invoiceNum); invoiceGroups[invoiceNum]=''; }
+      invoiceGroups[invoiceNum] += sectionText + '\n';
+    }
+
+    Object.keys(invoiceGroups).forEach(invoiceNum => {
+      const sectionText = invoiceGroups[invoiceNum] || '';
+
+      const dateMatch = sectionText.match(/^\s*(\d{2}\/\d{2}\/\d{4})/);
+      const invoiceDate = dateMatch ? dateMatch[1] : '';
+
+      const headerSlice = sectionText.substring(0,1200);
+      let supplier='';
+      const supplierPattern=/(Rüdt Industrielacke GmbH & Co\. KG|Norix Lackfabrik GmbH & Co\. KG|Finalin GmbH & Co\. KG|Mankiewicz Coatings, LLC)/i;
+      const supplierMatch = headerSlice.match(supplierPattern);
+      if(supplierMatch){ supplier = supplierMatch[1].trim(); }
+
+      let invoiceTotal='';
+      const overallPattern=/Overall\s+amount\s+in\s+USD\s+([\d,]+\.?\d*)/gi;
+      const overallMatches=[...sectionText.matchAll(overallPattern)];
+      if(overallMatches.length) invoiceTotal = overallMatches.at(-1)[1].replace(/,/g,'');
+
+      const UNIT_WORD = '(?:carton|bucket(?:s|\\(s\\))?|pail|tin|can|barrel|canister|cartridge|bottle(?:s|\\(s\\))?|piece(?:\\(s\\))?|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|Kilogramme)';
+
+      const linePatternA = new RegExp(
+        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
+        String.raw`x\s*([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
+        String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
+        String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
+        String.raw`([\d,]+\.?\d+)`,
+        'gi'
+      );
+
+      const linePatternB = new RegExp(
+        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +
+        String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
+        String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
+        String.raw`([\d,]+\.?\d+)`,
+        'gi'
+      );
+
+      const positionsFound = new Set();
+      const lineItems = [];
+
+      function pushItem(c){
+        const {position,partNumber,containerQty,perUnitQty,perUnitType,totalQty,totalUnit,unitPrice,priceUnit,lineTotal,matchIndex}=c;
+        let quantity, unit;
+        if(['CN','PC','CAT','TIN','BTL','BUC'].includes(priceUnit)){
+          quantity = containerQty || totalQty; unit = priceUnit;
+        }else if(['KG','GAL','PT','QT','FOZ','L'].includes(priceUnit)){
+          quantity = totalQty; unit = priceUnit;
+        }else if(priceUnit === totalUnit){
+          quantity = totalQty; unit = priceUnit;
+        }else{ quantity = totalQty; unit = priceUnit; }
+
+        lineItems.push({
+          invoice_number:invoiceNum,
+          invoice_date:invoiceDate,
+          invoice_total:invoiceTotal,
+          supplier:supplier,
+          position,
+          part_number:partNumber,
+          quantity, unit,
+          unit_price:unitPrice,
+          line_total:lineTotal,
+          net_weight:'', country_of_origin:'',
+          _matchIndex:matchIndex
         });
+      }
 
-        uploadSection.addEventListener('dragleave', () => {
-            uploadSection.classList.remove('dragover');
+      let mA; while((mA=linePatternA.exec(sectionText))!==null){
+        const position=mA[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
+        pushItem({
+          position,
+          partNumber:(mA[2]||'').slice(0,64),
+          containerQty:(mA[3]||'').replace(/,/g,''),
+          perUnitQty:(mA[4]||'').replace(/,/g,''),
+          perUnitType:mA[5]||'',
+          totalQty:(mA[6]||'').replace(/,/g,''),
+          totalUnit:mA[7]||'',
+          unitPrice:mA[8]||'',
+          priceUnit:mA[9]||'',
+          lineTotal:(mA[10]||'').replace(/,/g,''),
+          matchIndex:mA.index ?? 0
         });
+      }
 
-        uploadSection.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadSection.classList.remove('dragover');
-            const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
-            if (files.length > 0) {
-                handleFiles(files);
-            }
+      let mB; while((mB=linePatternB.exec(sectionText))!==null){
+        const position=mB[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
+        pushItem({
+          position,
+          partNumber:(mB[2]||'').slice(0,64),
+          containerQty:(mB[3]||'').replace(/,/g,''),
+          perUnitQty:'', perUnitType:'',
+          totalQty:(mB[4]||'').replace(/,/g,''),
+          totalUnit:mB[5]||'',
+          unitPrice:(mB[6]||''),
+          priceUnit:mB[7]||'',
+          lineTotal:(mB[8]||'').replace(/,/g,''),
+          matchIndex:mB.index ?? 0
         });
+      }
 
-        fileInput.addEventListener('change', (e) => {
-            handleFiles(Array.from(e.target.files));
-        });
+      const enriched=[];
+      for(let idx=0; idx<lineItems.length; idx++){
+        const item=lineItems[idx];
+        const startPos=item._matchIndex ?? 0;
+        const endPos = idx < lineItems.length-1 ? (lineItems[idx+1]._matchIndex ?? (startPos+2000)) : (startPos+3000);
+        const itemSection = sectionText.substring(startPos, Math.min(endPos, sectionText.length));
 
-        function handleFiles(files) {
-            selectedFiles = files;
-            fileInfo.textContent = `${files.length} file(s) selected: ${files.map(f => f.name).join(', ')}`;
-            processBtn.disabled = false;
+        const weightMatch=itemSection.match(/([\d,.]+)\s+L\s+([\d,.]+)\s+L/);
+        if(weightMatch){ item.net_weight=(weightMatch[2]||'').replace(/,/g,''); }
+
+        const cooMatch=itemSection.match(/Country\s+of\s+origin:\s*([^\n]+?)(?:\s|$)/i);
+        if(cooMatch){ let country=(cooMatch[1]||'').trim();
+          const lc=country.toLowerCase(); if(lc.includes('germany')) country='DE'; else if(lc.includes('japan')) country='JP'; else if(lc.includes('netherlands')) country='NL'; else if(lc.includes('united')&&lc.includes('kingdom')) country='GB';
+          item.country_of_origin=country; }
+
+        const steelBlockMatch = itemSection.match(/9903\.81\.91\s*-\s*Steel\s*Packaging([\s\S]*?)(?:9903\.85\.08|Total\s+invoice\s+value|Country\s+of\s+origin|Net\s+product\s+value|$)/i);
+        let steelWeightKG = NaN, steelCustomsUSD = NaN;
+        if(steelBlockMatch){
+          const steelBlock = steelBlockMatch[1];
+          const w1 = steelBlock.match(/Total\s+net\s+steel\s+weight\s+per\s+KG:\s*([\d,.]+)/i);
+          if(w1) steelWeightKG = parseFloatSafe(w1[1]);
+          if(isNaN(steelWeightKG)){
+            const cpcs = steelBlock.match(/Steel\s+content\s+per\s+PCS:\s*([\d,.]+)\s*KG/i);
+            const qpcs = steelBlock.match(/Quantity\s+per\s*PCS:\s*([\d,.]+)/i);
+            if(cpcs && qpcs){ steelWeightKG = parseFloatSafe(cpcs[1]) * parseFloatSafe(qpcs[1]); }
+          }
+          const cval = steelBlock.match(/Total\s+customs\s+value:\s*([\d,.]+)\s*USD/i);
+          if(cval) steelCustomsUSD = parseFloatSafe(cval[1]);
         }
 
-        processBtn.addEventListener('click', async () => {
-            processBtn.disabled = true;
-            results.innerHTML = '<div class="loading"><div class="spinner"></div><p>Processing invoices...</p></div>';
-            
-            try {
-                processedData = [];
-                for (const file of selectedFiles) {
-                    const data = await processPDF(file);
-                    processedData.push(data);
-                }
-                displayResults(processedData);
-                downloadBtn.style.display = 'inline-block';
-            } catch (error) {
-                results.innerHTML = `<div class="error">Error processing files: ${error.message}</div>`;
-            } finally {
-                processBtn.disabled = false;
-            }
-        });
-
-        async function processPDF(file) {
-            const arrayBuffer = await file.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-            
-            let fullText = '';
-            for (let i = 1; i <= pdf.numPages; i++) {
-                const page = await pdf.getPage(i);
-                const textContent = await page.getTextContent();
-                const pageText = textContent.items.map(item => item.str).join(' ');
-                fullText += pageText + '\n';
-            }
-
-            return parseInvoiceData(fullText, file.name);
+        const alumBlockMatch = itemSection.match(/9903\.85\.08\s*-\s*Aluminum\s*Content[\s\S]*?(?:Total\s+invoice\s+value|Country\s+of\s+origin|Net\s+product\s+value|$)/i);
+        let alumQty = NaN, alumCustomsUSD = NaN, alumUnit='KG';
+        if(alumBlockMatch){
+          const alumBlock = alumBlockMatch[0];
+          const aq = alumBlock.match(/Total\s+aluminum\s+content:\s*([\d,.]+)/i);
+          if(aq) alumQty = parseFloatSafe(aq[1]);
+          const cvalA = alumBlock.match(/Total\s+customs\s+value:\s*([\d,.]+)\s*USD/i);
+          if(cvalA) alumCustomsUSD = parseFloatSafe(cvalA[1]);
         }
 
-        function parseInvoiceData(text, filename) {
-            const invoiceNumberMatch = text.match(/Customs Invoice (\d+)/);
-            const dateMatch = text.match(/from (\d{2}\/\d{2}\/\d{4})/);
-            
-            const invoiceNumber = invoiceNumberMatch ? invoiceNumberMatch[1] : 'Unknown';
-            const invoiceDate = dateMatch ? dateMatch[1] : 'Unknown';
-
-            const lineItems = parseLineItems(text);
-            
-            const totalMatch = text.match(/Overall amount in USD\s+([\d,]+\.\d{2})/);
-            const totalAmount = totalMatch ? parseFloat(totalMatch[1].replace(/,/g, '')) : 0;
-
-            return {
-                filename,
-                invoiceNumber,
-                invoiceDate,
-                lineItems,
-                totalAmount
-            };
+        let mainLineTotal = parseFloatSafe(item.line_total);
+        const steelAdd = isNaN(steelCustomsUSD)?0:steelCustomsUSD;
+        const alumAdd  = isNaN(alumCustomsUSD)?0:alumCustomsUSD;
+        if(!isNaN(mainLineTotal) && (steelAdd>0 || alumAdd>0)){
+          mainLineTotal = Math.max(0, mainLineTotal - steelAdd - alumAdd);
+          item.line_total = fmt2(mainLineTotal);
         }
 
-        function parseLineItems(text) {
-            const items = [];
-            const lines = text.split('\n');
-            
-            let currentItem = null;
-            let captureNext = false;
-            
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
-                
-                // Match POS number and product number
-                const posMatch = line.match(/^(\d+)\s+([A-Z0-9]+\.[A-Z0-9]+\.[A-Z0-9]+\.[A-Z0-9]+)/);
-                if (posMatch) {
-                    if (currentItem) {
-                        items.push(currentItem);
-                    }
-                    
-                    currentItem = {
-                        pos: posMatch[1],
-                        productNumber: posMatch[2],
-                        productName: '',
-                        quantity: '',
-                        totalQuantity: '',
-                        pricePerUnit: '',
-                        totalPrice: ''
-                    };
-                    captureNext = true;
-                    continue;
-                }
-                
-                if (currentItem && captureNext) {
-                    // Capture product name
-                    if (!currentItem.productName && line && !line.match(/^\d/) && !line.includes('Your PO')) {
-                        currentItem.productName += (currentItem.productName ? ' ' : '') + line;
-                    }
-                    
-                    // Parse quantity line with UPDATED PATTERNS
-                    const quantityInfo = parseQuantityLine(line);
-                    if (quantityInfo) {
-                        currentItem.quantity = quantityInfo.quantity;
-                        currentItem.totalQuantity = quantityInfo.total;
-                    }
-                    
-                    // Parse price line - UPDATED to include QT and CN units
-                    const priceMatch = line.match(/([\d,]+\.\d{2})\s+USD\/(?:GAL|KG|TIN|QT|CN)\s+([\d,]+\.\d{2})/);
-                    if (priceMatch) {
-                        currentItem.pricePerUnit = parseFloat(priceMatch[1].replace(/,/g, ''));
-                        currentItem.totalPrice = parseFloat(priceMatch[2].replace(/,/g, ''));
-                    }
-                }
+        enriched.push(item);
+
+        if(steelAdd>0){
+          enriched.push({
+            invoice_number: invoiceNum,
+            invoice_date: invoiceDate,
+            invoice_total: invoiceTotal,
+            supplier: supplier,
+            position: `${item.position}S`,
+            part_number: `Steel - ${item.part_number}`.slice(0,64),
+            quantity: isNaN(steelWeightKG)?'':fmt2(steelWeightKG),
+            unit: 'KG',
+            unit_price: '',
+            line_total: fmt2(steelCustomsUSD),
+            net_weight: '',
+            country_of_origin: item.country_of_origin || ''
+          });
+        }
+
+        if(alumAdd>0){
+          enriched.push({
+            invoice_number: invoiceNum,
+            invoice_date: invoiceDate,
+            invoice_total: invoiceTotal,
+            supplier: supplier,
+            position: `${item.position}A`,
+            part_number: `Aluminum - ${item.part_number}`.slice(0,64),
+            quantity: isNaN(alumQty)?'':fmt2(alumQty),
+            unit: alumUnit,
+            unit_price: '',
+            line_total: fmt2(alumCustomsUSD),
+            net_weight: '',
+            country_of_origin: item.country_of_origin || ''
+          });
+        }
+      }
+
+      enriched.forEach(it=>{ delete it._matchIndex; });
+      if(enriched.length===0){
+        enriched.push({invoice_number:invoiceNum,invoice_date:invoiceDate,invoice_total:invoiceTotal,supplier:supplier,position:'',part_number:'',quantity:'',unit:'',unit_price:'',line_total:'',net_weight:'',country_of_origin:''});
+      }
+
+      allData.push(...enriched);
+    });
+  }
+
+  function _rankSuffix(s){ return s===''?0:(s==='S'?1:2); }
+  function _parsePos(p){
+    const m=String(p||'').match(/^(\d+(?:[.,]\d+)?)([A-Za-z]?)$/);
+    if(!m) return {n:999999, s:''};
+    return { n: parseFloat(String(m[1]).replace(',', '.')), s:(m[2]||'').toUpperCase() };
+  }
+
+  function setupInterface(){
+    const select=document.getElementById('invoiceSelect');
+    select.innerHTML='<option value="">Select an invoice...</option>';
+    const invoices={};
+    allData.forEach(item=>{ if(!invoices[item.invoice_number]){ invoices[item.invoice_number]={date:item.invoice_date,supplier:item.supplier,total:item.invoice_total,itemCount:0}; } invoices[item.invoice_number].itemCount++; });
+    invoiceOrder.forEach(num=>{ const inv = invoices[num] || {date:'',supplier:'',total:0,itemCount:0}; const total=parseFloat(inv.total||0).toLocaleString('en-US',{minimumFractionDigits:2}); const opt=document.createElement('option'); opt.value=num; opt.textContent=`Invoice ${num} (${inv.itemCount} items) - ${inv.date} - ${inv.supplier} - $${total}`; select.appendChild(opt); });
+    document.getElementById('controls').style.display='block';
+    select.addEventListener('change', function(){ currentInvoice=this.value; if(currentInvoice) loadInvoiceData(); else hideDataView(); });
+  }
+
+  function hideDataView(){
+    document.getElementById('stats').style.display='none';
+    document.getElementById('tableContainer').style.display='none';
+  }
+
+  function loadInvoiceData(){
+    let items = allData.filter(d=>d.invoice_number===currentInvoice);
+    if(items.length===0){ const meta={invoice_number:currentInvoice,invoice_date:'',invoice_total:'',supplier:''}; items=[{...meta,position:'',part_number:'',quantity:'',unit:'',unit_price:'',line_total:'',net_weight:'',country_of_origin:''}]; }
+
+    items.sort((a,b)=>{
+      const A=_parsePos(a.position), B=_parsePos(b.position);
+      if(A.n!==B.n) return A.n-B.n;
+      return _rankSuffix(A.s) - _rankSuffix(B.s);
+    });
+
+    const meta = items[0]||{};
+    document.getElementById('statInvoice').textContent=currentInvoice;
+    document.getElementById('statDate').value=meta.invoice_date||'';
+    document.getElementById('statSupplier').value=meta.supplier||'';
+    document.getElementById('statTotal').value=meta.invoice_total||'';
+    document.getElementById('statItems').textContent=String(items.length);
+
+    const tbody=document.getElementById('tableBody');
+    tbody.innerHTML='';
+    items.forEach((row, idx)=>{ tbody.appendChild(renderRow(row, idx)); });
+
+    document.getElementById('stats').style.display='grid';
+    document.getElementById('tableContainer').style.display='block';
+
+    recomputeStats();
+  }
+
+  function renderRow(row, idx){
+    const tr=document.createElement('tr');
+
+    function cellInput(val, key, readonly=false){
+      const td=document.createElement('td');
+      const inp=document.createElement('input');
+      inp.value = (val==null?'':String(val));
+      if(readonly) inp.classList.add('readonly');
+      inp.readOnly = readonly;
+      inp.addEventListener('change',()=>{ updateCell(idx,key,inp.value); });
+      td.appendChild(inp); return td;
+    }
+
+    function btn(txt, cls, handler){ const b=document.createElement('button'); b.textContent=txt; b.className=cls; b.onclick=handler; return b; }
+
+    tr.appendChild(cellInput(row.position,'position'));
+    tr.appendChild(cellInput(row.part_number,'part_number'));
+    tr.appendChild(cellInput(row.quantity,'quantity'));
+    tr.appendChild(cellInput(row.unit,'unit'));
+    tr.appendChild(cellInput(row.unit_price,'unit_price'));
+    tr.appendChild(cellInput(row.line_total,'line_total'));
+
+    tr.appendChild(cellInput(row.net_weight,'net_weight'));
+    tr.appendChild(cellInput(row.country_of_origin,'country_of_origin'));
+
+    const actTd=document.createElement('td'); actTd.className='actions';
+    actTd.appendChild(btn('➕ Below','btn-info',()=>addRowBelow(idx)));
+    actTd.appendChild(btn('🗑️','btn-danger',()=>deleteRow(idx)));
+    tr.appendChild(actTd);
+
+    return tr;
+  }
+
+  function updateCell(rowIndex, key, value){
+    const items = allData.filter(d=>d.invoice_number===currentInvoice);
+    const sortedIdxMap = items
+      .map((row, idx)=>({row, idx}))
+      .sort((a,b)=>{
+        const A=_parsePos(a.row.position), B=_parsePos(b.row.position);
+        if(A.n!==B.n) return A.n-B.n;
+        return _rankSuffix(A.s) - _rankSuffix(B.s);
+      })
+      .map(x=>x.idx);
+
+    const realIdx = sortedIdxMap[rowIndex];
+    const recs = allData.filter(d=>d.invoice_number===currentInvoice);
+    recs[realIdx][key]=value;
+    loadInvoiceData();
+  }
+
+  function addRowBelow(rowIndex){
+    const items = allData.filter(d=>d.invoice_number===currentInvoice);
+    items.sort((a,b)=>{
+      const A=_parsePos(a.position), B=_parsePos(b.position);
+      if(A.n!==B.n) return A.n-B.n;
+      return _rankSuffix(A.s) - _rankSuffix(B.s);
+    });
+    const base = items[rowIndex];
+    const insertPos = `${String(base.position).replace(/[^0-9].*$/,'')}${String.fromCharCode(65 + Math.floor(Math.random()*26))}`;
+    const newRow = { invoice_number:currentInvoice, invoice_date:base.invoice_date, invoice_total:base.invoice_total, supplier:base.supplier, position:insertPos, part_number:'', quantity:'', unit:'', unit_price:'', line_total:'', net_weight:'', country_of_origin:base.country_of_origin };
+    const firstIdx = allData.findIndex(d=>d===base);
+    allData.splice(firstIdx+1,0,newRow);
+    loadInvoiceData();
+  }
+
+  function deleteRow(rowIndex){
+    const items = allData.filter(d=>d.invoice_number===currentInvoice);
+    items.sort((a,b)=>{
+      const A=_parsePos(a.position), B=_parsePos(b.position);
+      if(A.n!==B.n) return A.n-B.n;
+      return _rankSuffix(A.s) - _rankSuffix(B.s);
+    });
+    const base = items[rowIndex];
+    const idx = allData.findIndex(d=> d===base);
+    if(idx>=0){ allData.splice(idx,1); loadInvoiceData(); }
+  }
+
+  function addBlankRowForCurrent(){
+    if(!currentInvoice){ showAlert('Select an invoice first','error'); return; }
+    const items = allData.filter(d=>d.invoice_number===currentInvoice);
+    const meta = items[0]||{};
+    const newRow = { invoice_number:currentInvoice, invoice_date:meta.invoice_date||'', invoice_total:meta.invoice_total||'', supplier:meta.supplier||'', position:'', part_number:'', quantity:'', unit:'', unit_price:'', line_total:'', net_weight:'', country_of_origin:meta.country_of_origin||'' };
+    allData.push(newRow); loadInvoiceData();
+  }
+
+  function updateInvoiceField(field, value){
+    allData.forEach(d=>{ if(d.invoice_number===currentInvoice){ d[field]=value; }});
+  }
+  function updateInvoiceTotal(value){ updateInvoiceField('invoice_total', value); recomputeStats(); }
+
+  function recomputeStats(){
+    const items = allData.filter(d=>d.invoice_number===currentInvoice);
+    const sum = items.reduce((acc,r)=> acc + (parseFloatSafe(r.line_total)||0), 0);
+    const invTotal = parseFloatSafe(items[0]?.invoice_total);
+    const diff = (isNaN(invTotal)?0:invTotal) - sum;
+    document.getElementById('statSum').textContent = '$'+sum.toFixed(2);
+    document.getElementById('statDiff').textContent = '$'+diff.toFixed(2);
+  }
+
+  function resetUpload(){ location.reload(); }
+
+  function exportToExcel(){
+    if(!allData.length){ showAlert('No data to export','error'); return; }
+    const wb = XLSX.utils.book_new();
+    const byInv = {};
+    allData.forEach(r=>{ if(!byInv[r.invoice_number]) byInv[r.invoice_number]=[]; byInv[r.invoice_number].push(r); });
+    Object.keys(byInv).forEach(inv=>{
+      const rows = byInv[inv].slice().sort((a,b)=>{
+        const A=_parsePos(a.position), B=_parsePos(b.position);
+        if(A.n!==B.n) return A.n-B.n;
+        return _rankSuffix(A.s) - _rankSuffix(B.s);
+      });
+      const header = [
+        ['Invoice', inv],
+        ['Date', rows[0]?.invoice_date || ''],
+        ['Supplier', rows[0]?.supplier || ''],
+        ['Invoice Total', rows[0]?.invoice_total || ''],
+        [],
+        ['Pos','Part Number','Quantity','Unit','Unit Price','Line Total','Net Weight','Country']
+      ];
+      const body = rows.map(r=>[
+        r.position||'', r.part_number||'', r.quantity||'', r.unit||'', r.unit_price||'', r.line_total||'', r.net_weight||'', r.country_of_origin||''
+      ]);
+      const ws = XLSX.utils.aoa_to_sheet([...header, ...body]);
+      XLSX.utils.book_append_sheet(wb, ws, `INV_${String(inv).slice(-10)}`);
+    });
+    const out = XLSX.write(wb, {type:'array', bookType:'xlsx'});
+    const blob = new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = (uploadedPdfName?uploadedPdfName+'_':'')+'parsed_invoices.xlsx';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  }
+
+  // ========================================
+  // DB LOAD (GITHUB RAW) & LOOKUPS
+  // ========================================
+
+  let mankiDb = null;
+  let htsCodesDb = null;
+  let steelAlumDb = null;
+
+  // MID sheet (uses MANUFACTURERNAME / MANUFACTURERMID)
+  let supplierMidDb = null;
+  let supplierMidIndex = [];
+
+  const GITHUB_CONFIG = {
+    owner: 'iffinc-ga',
+    repo: 'all_in_one_manki',
+    branch: 'main',
+    filePath: 'updated_manki_db.xlsx'
+  };
+
+  window.addEventListener('DOMContentLoaded', function() {
+    loadDatabaseFromGitHub();
+  });
+
+  async function loadDatabaseFromGitHub() {
+    const { owner, repo, branch, filePath } = GITHUB_CONFIG;
+    const dbUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
+    document.getElementById('dbStatus').textContent = 'Loading database...';
+    document.getElementById('dbStatus').className = 'db-status db-loading';
+    document.getElementById('dbInfo').textContent = `Fetching: ${dbUrl}`;
+
+    try {
+      const controller = new AbortController();
+      const t = setTimeout(()=>controller.abort(), 15000);
+      const response = await fetch(dbUrl, {signal: controller.signal});
+      clearTimeout(t);
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const arrayBuffer = await response.arrayBuffer();
+      const data = new Uint8Array(arrayBuffer);
+      const workbook = XLSX.read(data, {type:'array'});
+
+      if(workbook.SheetNames.includes('UPDATED_MANKI_DB')){
+        mankiDb = XLSX.utils.sheet_to_json(workbook.Sheets['UPDATED_MANKI_DB']);
+      } else throw new Error('UPDATED_MANKI_DB sheet not found');
+
+      if(workbook.SheetNames.includes('manki_hts_codes_with_uom')){
+        htsCodesDb = XLSX.utils.sheet_to_json(workbook.Sheets['manki_hts_codes_with_uom']);
+      } else throw new Error('manki_hts_codes_with_uom sheet not found');
+
+      if(workbook.SheetNames.includes('Sheet1')){
+        steelAlumDb = XLSX.utils.sheet_to_json(workbook.Sheets['Sheet1']);
+      } else throw new Error('Sheet1 not found');
+
+      // Load the MID sheet with exact headers
+      if(workbook.SheetNames.includes('MID')){
+        supplierMidDb = XLSX.utils.sheet_to_json(workbook.Sheets['MID'], {defval:''});
+        buildSupplierMidIndex(); // builds from MANUFACTURERNAME / MANUFACTURERMID
+      } else {
+        supplierMidDb = [];
+        supplierMidIndex = [];
+        console.warn('[MID] Sheet "MID" not found.');
+      }
+
+      document.getElementById('dbStatus').textContent = `Database loaded ✓ (${mankiDb.length} parts, ${htsCodesDb.length} HTS, ${steelAlumDb.length} mappings, ${supplierMidIndex.length} MIDs)`;
+      document.getElementById('dbStatus').className = 'db-status db-loaded';
+      document.getElementById('dbInfo').textContent = `Loaded at ${new Date().toLocaleString()}`;
+    } catch(err) {
+      console.error('Database load error:', err);
+      document.getElementById('dbStatus').textContent = 'Database load failed — continuing without DB ✗';
+      // Allow app to continue without DB
+      mankiDb = mankiDb || [];
+      htsCodesDb = htsCodesDb || [];
+      steelAlumDb = steelAlumDb || [];
+      supplierMidDb = supplierMidDb || [];
+      supplierMidIndex = supplierMidIndex || [];
+      document.getElementById('dbStatus').className = 'db-status db-error';
+      document.getElementById('dbInfo').innerHTML = `<strong>Error:</strong> ${err.message}<br><strong>Fix:</strong> Check GITHUB_CONFIG or network.`;
+    }
+  }
+
+  // ===== Helper lookups (unchanged) =====
+  function extractBasePartNumber(fullPartNum){
+    const s = String(fullPartNum || '').trim();
+    const head = s.split('.')[0];
+    const alnum = (head.match(/[A-Za-z0-9]+/)||[''])[0];
+    if (alnum.length >= 5) return alnum.slice(0,5);
+    if (alnum.length === 4) return alnum;
+    const fallback = (s.match(/[A-Za-z0-9]{4,5}/)||[''])[0];
+    return fallback || alnum || '';
+  }
+
+  function lookupTariffs(basePartNum){
+    if(!mankiDb) return [];
+    const part = mankiDb.find(row => String(row['PRIMARY PART NUM']) === basePartNum);
+    if(!part) return [];
+    const tariffs = [];
+    for(let i=0; i<=5; i++){
+      const col = i===0 ? 'TARIFF NUM' : `TARIFF NUM_${i}`;
+      if(part[col]){
+        const tariffStr = String(part[col]).replace(/\.0$/, '');
+        tariffs.push(tariffStr);
+      }
+    }
+    return tariffs;
+  }
+
+  function lookupHtsUom(htsCode){
+    if(!htsCodesDb) return {uom1: '', uom2: ''};
+    const hts = htsCodesDb.find(row => String(row['HTS Code']) === String(htsCode));
+    if(!hts) return {uom1: '', uom2: ''};
+    return { uom1: hts['UOM1'] || '', uom2: hts['UOM2'] || '' };
+  }
+
+  function getSteelAlumPartNumber(tariff, type){
+    if(!steelAlumDb) return type === 'Steel' ? 'STEEL GENERIC' : 'ALUM GENERIC';
+    const mapping = steelAlumDb.find(row => String(row['Tariff']).replace(/\.0$/, '') === String(tariff));
+    if(mapping) return type === 'Steel' ? mapping['Steel'] : mapping['Aluminum'];
+    return type === 'Steel' ? 'STEEL GENERIC' : 'ALUM GENERIC';
+  }
+
+  // ====== Supplier MID: exact headers + fuzzy matching (no hard-coded map) ======
+  function stripDiacritics(s){
+    try { return s.normalize('NFKD').replace(/[\u0300-\u036f]/g,''); } catch(_) { return s; }
+  }
+  function normalizeSupplierName(s){
+    return stripDiacritics(String(s||''))
+      .toLowerCase()
+      .replace(/&/g,' and ')
+      .replace(/\b(gmbh|co\.?|kg|llc|inc\.?|ltd\.?|company|coatings|industrie|lackfabrik|the|and|of|factory|fabrik|sa|ag|gebr|geb\.)\b/gi,'')
+      .replace(/[^a-z0-9]+/g,'')
+      .trim();
+  }
+  function onlyConsonants(s){ return String(s||'').replace(/[aeiou]/gi,''); }
+  function diceCoefficient(a,b){
+    if(!a || !b) return 0;
+    if(a === b) return 1;
+    const grams = t => { const r=[]; for(let i=0;i<t.length-1;i++) r.push(t.slice(i,i+2)); return r; };
+    const A=grams(a), B=grams(b);
+    if(!A.length || !B.length) return 0;
+    const map={}; let hit=0;
+    A.forEach(g=>map[g]=(map[g]||0)+1);
+    B.forEach(g=>{ if(map[g]){ hit++; map[g]--; }});
+    return (2*hit)/(A.length+B.length);
+  }
+
+  function buildSupplierMidIndex(){
+    supplierMidIndex = [];
+    if(!Array.isArray(supplierMidDb)) return;
+    supplierMidDb.forEach(row=>{
+      const rawName = String(row['MANUFACTURERNAME'] ?? '').trim();
+      const rawMid  = String(row['MANUFACTURERMID'] ?? '').trim();
+      if(!rawName || !rawMid) return;
+      const norm = normalizeSupplierName(rawName);
+      supplierMidIndex.push({ raw: rawName, norm, cons: onlyConsonants(norm), mid: rawMid });
+    });
+    console.log(`[MID] Indexed ${supplierMidIndex.length} manufacturer→MID entries (MANUFACTURERNAME / MANUFACTURERMID).`);
+  }
+
+  function scoreSupplierCandidate(qNorm, qRaw, rec){
+    const exact = qNorm === rec.norm ? 1 : 0;
+    const starts = rec.norm.startsWith(qNorm) ? 0.95 : 0;
+    const contains = rec.norm.includes(qNorm) || qNorm.includes(rec.norm) ? 0.85 : 0;
+    const dice = diceCoefficient(qNorm, rec.norm);
+    const qCons = onlyConsonants(qNorm);
+    const consDice = diceCoefficient(qCons, rec.cons);
+    let shortBoost = 0;
+    if(qNorm.length >= 3 && qNorm.length <= 6){
+      if(rec.norm.includes(qNorm)) shortBoost = 0.25;
+      else if(rec.cons.includes(qCons)) shortBoost = 0.18;
+    }
+    const rawContains = stripDiacritics(rec.raw).toLowerCase().includes(stripDiacritics(qRaw).toLowerCase()) ? 0.2 : 0;
+    return Math.max(exact, starts, contains, dice, consDice) + shortBoost + rawContains;
+  }
+
+  function lookupSupplierMIDFromText(userSupplierText){
+    if(!userSupplierText) return '';
+    if(!supplierMidIndex.length) return '';
+    const qRaw  = String(userSupplierText||'').trim();
+    const qNorm = normalizeSupplierName(qRaw);
+    if(!qNorm) return '';
+
+    let best = { score: 0, mid: '' };
+    for(const rec of supplierMidIndex){
+      const s = scoreSupplierCandidate(qNorm, qRaw, rec);
+      if(s > best.score) best = { score: s, mid: rec.mid };
+    }
+    const thresh = (qNorm.length <= 6) ? 0.38 : 0.45;
+    return best.score >= thresh ? best.mid : '';
+  }
+
+  // === Export ALL invoices to Descartes template (SupplierMID wired) ===
+  function exportToDescartes(){
+    if(!mankiDb || !htsCodesDb || !steelAlumDb){
+      showAlert('Database not loaded yet. Please wait for it to load from GitHub.','error');
+      return;
+    }
+    if(!allData.length){ showAlert('No data to export','error'); return; }
+
+    const items = allData.slice().sort((a,b)=>{
+      const ai = String(a.invoice_number||''); const bi = String(b.invoice_number||'');
+      if (ai !== bi) return ai.localeCompare(bi);
+      const A=_parsePos(a.position), B=_parsePos(b.position);
+      if(A.n!==B.n) return A.n-B.n;
+      return _rankSuffix(A.s) - _rankSuffix(B.s);
+    });
+
+    const exportRows = [];
+
+    const roundWeight = (val) => {
+      const num = parseFloat(val);
+      if (isNaN(num)) return '';
+      if (num < 1) return 1;
+      return Math.round(num);
+    };
+
+    // Capture the *current* UI supplier per invoice at export time
+    const currentUiSupplierByInvoice = {};
+    try{
+      const uiSupplier = document.getElementById('statSupplier')?.value || '';
+      const uiInvoice  = document.getElementById('statInvoice')?.textContent || '';
+      if(uiInvoice){ currentUiSupplierByInvoice[uiInvoice] = uiSupplier; }
+    }catch(_){}
+
+    // Also infer from items to cover invoices not currently selected
+    items.forEach(rec=>{
+      const inv = rec.invoice_number;
+      if(!currentUiSupplierByInvoice[inv]) currentUiSupplierByInvoice[inv] = rec.supplier || '';
+    });
+
+    items.forEach(item => {
+      const isSteelLine = String(item.position||'').endsWith('S') || item.part_number === 'STEEL';
+      const isAlumLine  = String(item.position||'').endsWith('A') || item.part_number === 'ALUMINUM';
+
+      let buyerPartNum, supplierPartNum;
+      if (!isSteelLine && !isAlumLine) {
+        const basePart = extractBasePartNumber(item.part_number);
+        buyerPartNum = basePart;
+        supplierPartNum = basePart;
+      } else {
+        const parentPos = String(item.position||'').replace(/[SA]$/,'');
+        const parentItem = items.find(it => it.invoice_number===item.invoice_number && it.position === parentPos);
+        let tariffForSubline = null;
+        if (parentItem) {
+          const parentBase = extractBasePartNumber(parentItem.part_number);
+          const parentTariffs = lookupTariffs(parentBase);
+          tariffForSubline = parentTariffs.find(t => !String(t).startsWith('98') && !String(t).startsWith('99')) || null;
+        }
+        const subNum = tariffForSubline
+          ? getSteelAlumPartNumber(tariffForSubline, isSteelLine ? 'Steel' : 'Aluminum')
+          : (isSteelLine ? 'STEEL GENERIC' : 'ALUM GENERIC');
+        buyerPartNum = subNum;
+        supplierPartNum = subNum;
+      }
+
+      const supplierForInvoice = currentUiSupplierByInvoice[item.invoice_number] || item.supplier || '';
+      const row = {
+        'InvoiceNumber': item.invoice_number,
+        'InvoiceDate': item.invoice_date,
+        'InvoiceTotal': item.invoice_total,
+        'SupplierMID': lookupSupplierMIDFromText(supplierForInvoice), // <<< MAIN CHANGE
+        'SupplierName': supplierForInvoice,
+        'BuyerPartNumber': buyerPartNum,
+        'SupplierPartNumber': supplierPartNum,
+        'Quantity': item.quantity,
+        'UnitOfMeasure': item.unit,
+        'Description': '',
+        'UnitPrice': item.unit_price,
+        'ItemTotal': item.line_total,
+        'CurrencyCode': '',
+        'ExchangeRate': '',
+        'CountryOfOrigin': item.country_of_origin,
+        'CountryOfExport': '',
+        'DateOfExport': '',
+        'PortOfLading': '',
+        'RelatedParty': '',
+        'PO_Number': '',
+        'PO_Date': '',
+        'GrossWeight': '',
+        'GrossWeightUnit': '',
+        'NetWeight': roundWeight(item.net_weight),
+        'TariffNumber': '',
+        'TariffDescription': '',
+        'Quantity1': '',
+        'UnitOfMeasure1': '',
+        'Quantity2': '',
+        'UnitOfMeasure2': '',
+        'Quantity3': '',
+        'UnitOfMeasure3': '',
+        'PrimarySPI': '',
+        'SecondarySPI': '',
+        'DeliverTo': '',
+        'SoldTo': '',
+        'SellerMID': '',
+        'ShipperMID': '',
+        'EntryDate': '',
+        'ArrivalDate': '',
+        'Carrier': '',
+        'Vessel': '',
+        'Voyage': '',
+        'PortOfEntry': '',
+        'PortOfUnloading': '',
+        'LocationCode': '',
+        'TotalCharges': '',
+        'BillOfLadingNumber': '',
+        'Container': '',
+        'SecondaryTariffNumber': '',
+        'SecondaryTariffdescription': '',
+        'Secondary Quantity1': '',
+        'Secondaryunitofmeasure1': '',
+        'secondaryquantity2': '',
+        'secondaryunitofmeasure2': '',
+        'secondaryquantity3': '',
+        'secondaryunitofmeasure3': '',
+        'secondaryvalue': '',
+        'FTZStatus': '',
+        'FTZPrivilegedDate\u00a0': '',
+        'ThirdTariffNumber': '',
+        'ThirdTariffDescription': '',
+        'ThirdTariffQuantity1': '',
+        'ThirdTariffUnitofMeasure1': '',
+        'ThirdTariffQuantity2': '',
+        'ThirdTariffUnitofMeasure2': '',
+        'ThirdTariffQuantity3': '',
+        'ThirdTariffUnitofMeasure3': '',
+        'Third Value': '',
+        '4TariffNumber': '',
+        '4TariffDescription': '',
+        '4TariffQuantity1': '',
+        '4TariffUnitofMeasure1': '',
+        '4TariffQuantity2': '',
+        '4TariffUnitofMeasure2': '',
+        '4TariffQuantity3': '',
+        '4TariffUnitofMeasure3': '',
+        '4 Value': '',
+        '5TariffNumber': '',
+        '5TariffDescription': '',
+        '5TariffQuantity1': '',
+        '5TariffUnitofMeasure1': '',
+        '5TariffQuantity2': '',
+        '5TariffUnitofMeasure2': '',
+        '5TariffQuantity3': '',
+        '5TariffUnitofMeasure3': '',
+        '5 Value': ''
+      };
+
+      if (isSteelLine || isAlumLine) {
+        row['NetWeight'] = roundWeight(item.quantity);
+      }
+
+      const basePartNum = extractBasePartNumber(item.part_number);
+      const tariffs = lookupTariffs(basePartNum);
+      const tariffFields = ['TariffNumber', 'SecondaryTariffNumber', 'ThirdTariffNumber', '4TariffNumber', '5TariffNumber'];
+
+      tariffs.forEach((tariff, idx) => {
+        if(idx < tariffFields.length){
+          row[tariffFields[idx]] = tariff;
+          const startsWithExempt = String(tariff).startsWith('98') || String(tariff).startsWith('99');
+          if(!startsWithExempt){
+            const uomInfo = lookupHtsUom(tariff);
+            if(idx === 0){
+              row['Quantity1'] = roundWeight(item.net_weight);
+              row['UnitOfMeasure1'] = uomInfo.uom1;
+              if(uomInfo.uom2){ row['Quantity2'] = roundWeight(item.net_weight); row['UnitOfMeasure2'] = uomInfo.uom2; }
+            } else if(idx === 1){
+              row['Secondary Quantity1'] = roundWeight(item.net_weight);
+              row['Secondaryunitofmeasure1'] = uomInfo.uom1;
+              if(uomInfo.uom2){ row['secondaryquantity2'] = roundWeight(item.net_weight); row['secondaryunitofmeasure2'] = uomInfo.uom2; }
+            } else if(idx === 2){
+              row['ThirdTariffQuantity1'] = roundWeight(item.net_weight);
+              row['ThirdTariffUnitofMeasure1'] = uomInfo.uom1;
+              if(uomInfo.uom2){ row['ThirdTariffQuantity2'] = roundWeight(item.net_weight); row['ThirdTariffUnitofMeasure2'] = uomInfo.uom2; }
+            } else if(idx === 3){
+              row['4TariffQuantity1'] = roundWeight(item.net_weight);
+              row['4TariffUnitofMeasure1'] = uomInfo.uom1;
+              if(uomInfo.uom2){ row['4TariffQuantity2'] = roundWeight(item.net_weight); row['4TariffUnitofMeasure2'] = uomInfo.uom2; }
+            } else if(idx === 4){
+              row['5TariffQuantity1'] = roundWeight(item.net_weight);
+              row['5TariffUnitofMeasure1'] = uomInfo.uom1;
+              if(uomInfo.uom2){ row['5TariffQuantity2'] = roundWeight(item.net_weight); row['5TariffUnitofMeasure2'] = uomInfo.uom2; }
             }
-            
-            if (currentItem) {
-                items.push(currentItem);
-            }
-            
-            return items;
+          }
         }
+      });
 
-        function parseQuantityLine(text) {
-            // UPDATED PATTERNS - Added QT and enhanced KG patterns for missing line items
-            const patterns = [
-                /(\d+\.?\d*)\s*can\(s\)\s*x\s*(\d+\.?\d*)\s*GAL/i,
-                /(\d+\.?\d*)\s*tin\(s\)\s*x\s*(\d+\.?\d*)\s*GAL/i,
-                /(\d+\.?\d*)\s*tin\(s\)\s*x\s*(\d+\.?\d*)\s*QT/i,    // NEW: For POS 19 (QT units)
-                /(\d+\.?\d*)\s*bucket\(s\)\s*x\s*(\d+\.?\d*)\s*GAL/i,
-                /(\d+\.?\d*)\s*bucket\(s\)\s*x\s*(\d+\.?\d*)\s*KG/i, // ENHANCED: For POS 15 (KG units)
-                /(\d+\.?\d*)\s*pail\(s\)\s*x\s*(\d+\.?\d*)\s*GAL/i,
-                /(\d+\.?\d*)\s*pail\(s\)\s*x\s*(\d+\.?\d*)\s*KG/i,
-                /(\d+\.?\d*)\s*canister\s*x\s*(\d+\.?\d*)\s*GAL/i,
-            ];
-            
-            for (const pattern of patterns) {
-                const match = text.match(pattern);
-                if (match) {
-                    const quantity = `${match[1]} x ${match[2]}`;
-                    
-                    // Extract total from the same or next part
-                    const totalMatch = text.match(/(\d+\.?\d*)\s*(?:GAL|KG|QT|L)/);
-                    const total = totalMatch ? totalMatch[1] : '';
-                    
-                    return { quantity, total };
-                }
-            }
-            
-            return null;
+      if (isSteelLine) {
+        row['TariffNumber'] = '99030133';
+        row['SecondaryTariffNumber'] = '99038191';
+        row['Secondary Quantity1'] = roundWeight(item.quantity);
+        row['Secondaryunitofmeasure1'] = 'KG';
+      }
+
+      if (isAlumLine) {
+        row['TariffNumber'] = '99030133';
+        row['SecondaryTariffNumber'] = '99038508';
+        row['Secondary Quantity1'] = roundWeight(item.quantity);
+        row['Secondaryunitofmeasure1'] = 'KG';
+      }
+
+      exportRows.push(row);
+    });
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    XLSX.utils.book_append_sheet(wb, ws, 'Descartes Export');
+
+    const out = XLSX.write(wb, {type:'array', bookType:'xlsx'});
+    const blob = new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (uploadedPdfName?uploadedPdfName+'_':'')+'descartes_export.xlsx';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showAlert('Descartes template exported successfully!', 'success');
+  }
+</script>
+
+<!-- ===== Runtime normalization helpers (for weird spacing in PDFs) ===== -->
+<script>
+(function(){
+  function normalizeWeirdSpacing(s){
+    const esc = (ch)=>ch.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    const squish = (word)=>{
+      const pat = new RegExp(word.split('').map(esc).join('\\s*'),'ig');
+      return (txt)=>txt.replace(pat, word);
+    };
+    const common = [
+      'Steel','Aluminum','Packaging','Content','Quantity','per','PCS',
+      'Total','net','weight','value','customs','KG','invoice','Country','origin','product'
+    ];
+    let out = String(s);
+    for(const w of common){ out = squish(w)(out); }
+    out = out
+      .replace(/9903\.81\.91\s*-\s*S\s*t\s*e\s*e\s*l\s*\s*P\s*a\s*c\s*k\s*a\s*g\s*i\s*n\s*g/ig, '9903.81.91 - Steel Packaging')
+      .replace(/9903\.85\.08\s*-\s*A\s*l\s*u\s*m\s*i\s*n\s*u\s*m\s*\s*C\s*o\s*n\s*t\s*e\s*n\s*t(?:\s*\(in\s*metallic\s*paint\))?/ig, '9903.85.08 - Aluminum Content (in metallic paint)');
+    out = out
+      .replace(/Total\s+net\s+steel\s+weight\s*(?:per\s*KG)?\s*:/ig, 'Total net steel weight per KG:')
+      .replace(/Total\s+net\s+aluminum\s+weight\s*(?:per\s*KG)?\s*:/ig, 'Total net aluminum weight per KG:')
+      .replace(/Steel\s*content\s*per\s*PCS\s*:/ig, 'Steel content per PCS:')
+      .replace(/Aluminum\s*content\s*per\s*PCS\s*:/ig, 'Aluminum content per PCS:')
+      .replace(/Quantity\s*per\s*PCS\s*:/ig, 'Quantity per PCS:')
+      .replace(/Total\s+customs\s+value\s*:/ig, 'Total customs value:');
+    out = out.replace(/(\bKG)\s*\/\s*[0-9][0-9.,]*\s*USD\b/ig, '$1');
+    out = out.replace(/\s{2,}/g, ' ');
+    return out;
+  }
+
+  const needNorm = (re)=>{
+    if(!(re instanceof RegExp)) return false;
+    const src = (re.source || '').toLowerCase();
+    return /9903|steel|alum|customs\s+value|quantity\s*per\s*pcs|content\s*per\s*pcs|total\s+net\s+.*weight/.test(src);
+  };
+
+  const _origMatch = String.prototype.match;
+  Object.defineProperty(String.prototype, '__origMatch', { value: _origMatch, configurable: true });
+
+  String.prototype.match = function(re){
+    try{
+      if(needNorm(re)){
+        const norm = normalizeWeirdSpacing(String(this));
+        return _origMatch.call(norm, re);
+      }
+      return _origMatch.call(this, re);
+    }catch(e){
+      return _origMatch.call(this, re);
+    }
+  };
+})();
+</script>
+
+<!-- === Steel-first ordering for both UI and export (no UI changes) === -->
+<script>
+(function(){
+  function _rowInfo(row){
+    const inv = String(row.invoice_number || '').trim();
+    const pos = String(row.position || '').trim();
+    const base = pos.replace(/[SA]$/i, '');
+    let ord = 0;
+    if (/S$/i.test(pos)) ord = 1;
+    else if (/A$/i.test(pos)) ord = 2;
+    return { group: inv + '||' + base, ord };
+  }
+
+  function reorderSteelAlum(arr){
+    if (!Array.isArray(arr) || arr.length === 0) return arr;
+    const groupMap = new Map();
+    arr.forEach((r, idx) => {
+      const { group, ord } = _rowInfo(r);
+      if (!groupMap.has(group)) groupMap.set(group, []);
+      groupMap.get(group).push({ r, idx, ord });
+    });
+    const out = [];
+    const used = new Set();
+    arr.forEach((r, idx) => {
+      if (used.has(idx)) return;
+      const { group } = _rowInfo(r);
+      const bucket = groupMap.get(group);
+      if (!bucket) { out.push(r); return; }
+      bucket.sort((a, b) => (a.ord - b.ord) || (a.idx - b.idx));
+      bucket.forEach(({ r: row, idx: i }) => { out.push(row); used.add(i); });
+      groupMap.delete(group);
+    });
+    arr.length = 0;
+    Array.prototype.push.apply(arr, out);
+    return arr;
+  }
+
+  function detectDataArray(){
+    const candidates = [];
+    for (const k in window){
+      try{
+        const v = window[k];
+        if (Array.isArray(v) && v.length && typeof v[0] === 'object'){
+          const keys = Object.keys(v[0]);
+          if (keys.includes('invoice_number') && keys.includes('position')){
+            candidates.push({name:k, ref:v});
+          }
         }
+      }catch(_){ }
+    }
+    candidates.sort((a,b)=> (b.ref.length||0) - (a.ref.length||0));
+    return candidates[0] || null;
+  }
 
-        function displayResults(data) {
-            let html = '<div class="results-section">';
-            
-            data.forEach(invoice => {
-                html += `
-                    <div class="invoice-card">
-                        <div class="invoice-header">
-                            <div>
-                                <div class="invoice-number">Invoice #${invoice.invoiceNumber}</div>
-                                <div class="invoice-date">Date: ${invoice.invoiceDate}</div>
-                                <div class="invoice-date">File: ${invoice.filename}</div>
-                            </div>
-                            <div class="invoice-total">
-                                $${invoice.totalAmount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                            </div>
-                        </div>
-                        
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>POS</th>
-                                        <th>Product Number</th>
-                                        <th>Product Name</th>
-                                        <th>Quantity</th>
-                                        <th>Total Qty</th>
-                                        <th class="text-right">Price/Unit</th>
-                                        <th class="text-right">Total Price</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                `;
-                
-                invoice.lineItems.forEach(item => {
-                    html += `
-                        <tr>
-                            <td>${item.pos}</td>
-                            <td>${item.productNumber}</td>
-                            <td>${item.productName}</td>
-                            <td>${item.quantity}</td>
-                            <td>${item.totalQuantity}</td>
-                            <td class="text-right">$${item.pricePerUnit ? item.pricePerUnit.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00'}</td>
-                            <td class="text-right">$${item.totalPrice ? item.totalPrice.toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00'}</td>
-                        </tr>
-                    `;
-                });
-                
-                html += `
-                                </tbody>
-                            </table>
-                        </div>
-                        
-                        <div class="summary-section">
-                            <div class="summary-row">
-                                <span>Number of Line Items:</span>
-                                <span><strong>${invoice.lineItems.length}</strong></span>
-                            </div>
-                            <div class="summary-row total">
-                                <span>Invoice Total:</span>
-                                <span>$${invoice.totalAmount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
-            
-            html += '</div>';
-            results.innerHTML = html;
+  function proxyWithAutoReorder(arr){
+    const mutating = new Set(['push','pop','shift','unshift','splice','sort','reverse']);
+    return new Proxy(arr, {
+      get(target, prop, recv){
+        const val = Reflect.get(target, prop, recv);
+        if (typeof val === 'function' && mutating.has(prop)){
+          return function(){
+            const out = Array.prototype[prop].apply(target, arguments);
+            try { reorderSteelAlum(target); } catch(e){}
+            return out;
+          };
         }
+        return val;
+      },
+      set(target, prop, value, recv){
+        const ok = Reflect.set(target, prop, value, recv);
+        if (prop === 'length' || /^\d+$/.test(String(prop))){
+          try { reorderSteelAlum(target); } catch(e){}
+        }
+        return ok;
+      }
+    });
+  }
 
-        downloadBtn.addEventListener('click', () => {
-            const wb = XLSX.utils.book_new();
-            
-            processedData.forEach(invoice => {
-                const wsData = [
-                    ['Invoice Number', invoice.invoiceNumber],
-                    ['Date', invoice.invoiceDate],
-                    ['Filename', invoice.filename],
-                    ['Total Amount', invoice.totalAmount],
-                    [],
-                    ['POS', 'Product Number', 'Product Name', 'Quantity', 'Total Quantity', 'Price/Unit', 'Total Price']
-                ];
-                
-                invoice.lineItems.forEach(item => {
-                    wsData.push([
-                        item.pos,
-                        item.productNumber,
-                        item.productName,
-                        item.quantity,
-                        item.totalQuantity,
-                        item.pricePerUnit,
-                        item.totalPrice
-                    ]);
-                });
-                
-                const ws = XLSX.utils.aoa_to_sheet(wsData);
-                const sheetName = `Invoice_${invoice.invoiceNumber}`.substring(0, 31);
-                XLSX.utils.book_append_sheet(wb, ws, sheetName);
-            });
-            
-            XLSX.writeFile(wb, `Mankiewicz_Invoices_${new Date().toISOString().split('T')[0]}.xlsx`);
-        });
-    </script>
+  function hookRenderIfPresent(){
+    const names = ['renderTable','drawTable','buildTable','updateTable'];
+    names.forEach(n=>{
+      if (typeof window[n] === 'function'){
+        const _f = window[n];
+        window[n] = function(){
+          try { if (window.__dataArrayRef) reorderSteelAlum(window.__dataArrayRef); } catch(e){}
+          return _f.apply(this, arguments);
+        };
+      }
+    });
+  }
+
+  const found = detectDataArray();
+  if (found){
+    window.__dataArrayName = found.name;
+    window.__dataArrayRef  = found.ref;
+    const proxied = proxyWithAutoReorder(found.ref);
+    try { window[found.name] = proxied; } catch(_){ }
+    try { reorderSteelAlum(window.__dataArrayRef); } catch(e){}
+    hookRenderIfPresent();
+    document.addEventListener('click', (e)=>{
+      const id = (e.target && e.target.id || '').toLowerCase();
+      if (id.includes('export')) {
+        try { reorderSteelAlum(window.__dataArrayRef); } catch(_){ }
+      }
+    }, true);
+  }
+})();
+</script>
+
 </body>
 </html>
