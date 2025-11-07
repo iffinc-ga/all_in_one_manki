@@ -540,22 +540,22 @@
 
       inp.setAttribute('tabindex', String(_tabCounter++));
 
-      // ENTER: commit & focus next via re-render (suppress blur-change)
+      // ENTER: commit & focus next via re-render (suppress blur/change)
       inp.addEventListener('keydown', (ev)=>{
         if(ev.key==='Enter' && !readonly){
           ev.preventDefault();
-          suppressChangeOnce = true; // avoid double update on ensuing blur/change
+          suppressChangeOnce = true;
           const targetKey = nextKeyOf(key, +1);
           focusHint = { pos: String(row.position||''), key: targetKey };
           updateCell(idx, key, inp.value);
         }
       });
 
-      // TAB / SHIFT+TAB: commit & move via re-render (suppress blur-change)
+      // TAB / SHIFT+TAB: commit & move via re-render (suppress blur/change)
       inp.addEventListener('keydown', (ev)=>{
         if(ev.key === 'Tab' && !readonly){
           ev.preventDefault();
-          suppressChangeOnce = true; // ignore the immediate blur/change fired by Tab
+          suppressChangeOnce = true;
           const dir = ev.shiftKey ? -1 : 1;
           const targetKey = nextKeyOf(key, dir);
           focusHint = { pos: String(row.position||''), key: targetKey };
@@ -647,7 +647,7 @@
     loadInvoiceData();
   }
 
-  // >>> ONLY CHANGE HERE: restore parent total if deleting S/A subline
+  // Restore parent total if deleting S/A subline
   function deleteRow(rowIndex){
     const items = allData.filter(d=>d.invoice_number===currentInvoice);
     items.sort((a,b)=>{
@@ -657,7 +657,6 @@
     });
     const base = items[rowIndex];
 
-    // If deleting a Steel/Aluminum subline, add its Line Total back to parent
     const posStr = String(base?.position || '');
     const isSub = /[SA]$/i.test(posStr);
     if(isSub){
@@ -677,7 +676,6 @@
 
     loadInvoiceData();
   }
-  // <<< END CHANGE
 
   function addBlankRowForCurrent(){
     if(!currentInvoice){ showAlert('Select an invoice first','error'); return; }
@@ -770,17 +768,6 @@
   }
 
   /* =================== EXPORTS =================== */
-  function extractBasePartNumber(fullPartNum){
-    const s = String(fullPartNum || '').trim();
-    const head = s.split('.')[0];
-    const alnum = (head.match(/[A-Za-z0-9]+/] )||[''])[0];
-    // fix regex typo if occurred
-  }
-</script>
-
-<!-- NOTE: The following script block restores the accidentally truncated function (keep original from prior working file) -->
-<script>
-  // (Restoring extractBasePartNumber and the rest exactly as before)
   function extractBasePartNumber(fullPartNum){
     const s = String(fullPartNum || '').trim();
     const head = s.split('.')[0];
@@ -909,7 +896,7 @@
         supplierPartNum = subNum;
       }
 
-      const supplierForInvoice = currentUiSupplierByInvoice[item.invoice_number] || item.supplier || '';
+      const supplierForInvoice = (currentUiSupplierByInvoice[item.invoice_number] || item.supplier || '');
       const row = {
         'InvoiceNumber': item.invoice_number,
         'InvoiceDate': item.invoice_date,
@@ -1249,7 +1236,7 @@
   const retryBtn = document.getElementById('retryDbBtn');
   const offlineBtn = document.getElementById('offlineBtn');
 
-  retryBtn.addEventListener('click', ()=> loadDatabaseFromGitHub({force:true}));
+  retryBtn.addEventListener('click', ()=> loadDatabaseFromGitHub());
   offlineBtn.addEventListener('click', ()=> enterOfflineMode('Switched to offline mode by user.'));
 
   window.addEventListener('DOMContentLoaded', function() {
@@ -1330,12 +1317,14 @@
   }
 
   function enterOfflineMode(reason){
+    // Ensure arrays, not null, so exportToDescartes gate passes
     mankiDb = mankiDb || [];
     htsCodesDb = htsCodesDb || [];
     steelAlumDb = steelAlumDb || [];
     supplierMidDb = supplierMidDb || [];
     supplierMidIndex = supplierMidIndex || [];
     setDbBanner('offline', 'Offline mode (DB skipped)', reason || 'You can continue without the DB.');
+    showAlert('You are now working offline. You can parse, edit, and export (with limited enrichment).','success');
   }
 </script>
 
