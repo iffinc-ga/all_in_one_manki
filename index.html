@@ -259,7 +259,133 @@
       const overallMatches=[...sectionText.matchAll(overallPattern)];
       if(overallMatches.length) invoiceTotal = overallMatches.at(-1)[1].replace(/,/g,'');
 
-      const UNIT_WORD = '(?:carton|bucket(?:s|\\(s\\))?|pail|tin|can|barrel|canister|cartridge|bottle(?:s|\\(s\\))?|piece(?:\\(s\\))?|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|Kilogramme)';
+      const UNIT_WORD =
+  '(?:carton|bucket(?:s|\(s\))?|pail|tin(?:s|\(s\))?|can(?:s|\(s\))?|barrel|canister|cartridge|bottle(?:s|\(s\))?|piece(?:s|\(s\))?|Kilogramme)';
+// Tolerate injected "... L" fragments anywhere between numeric tokens
+const EXTRA_L = String.raw`(?:\s*[\d.,]+\s+L\s*)*`;
+
+// Allow "Pos:" label and an optional ",0" after the integer position (e.g., "Pos: 19,0")
+const POS_PREFIX = String.raw`(?:Pos:\s*)?`;
+const POS_NUM = String.raw`(\d{1,4})(?:,\d+)?`;
+
+// Pattern A: containerQty + containerUnit  x perUnitQty perUnitType  totalQty totalUnit  price  USD/unit  lineTotal
+const linePatternA = new RegExp(
+  String.raw`${POS_PREFIX}${POS_NUM}\s+([A-Z0-9.\-]+)\s+` +          // position + part
+  String.raw`([\d,]+\.?\d*)\s+${UNIT_WORD}\s*x\s*` +                 // container qty + unit
+  String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s*` +                         // per-unit qty + type
+  EXTRA_L +                                                          // tolerate "... L"
+  String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s*` +                         // total qty + total unit
+  EXTRA_L +
+  String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC|LB)\s+` + // unit price + unit
+  String.raw`([\d,]+(?:\.\d+)?)`,                                    // line total
+  'gi'
+);
+
+// Pattern B: no explicit "x ..." block; just container then total qty, then price, then total
+const linePatternB = new RegExp(
+  String.raw`${POS_PREFIX}${POS_NUM}\s+([A-Z0-9.\-]+)\s+` +          // position + part
+  String.raw`([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +                     // container qty + unit
+  EXTRA_L +
+  String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s*` +                         // total qty + total unit
+  EXTRA_L +
+  String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC|LB)\s+` + // unit price + unit
+  String.raw`([\d,]+(?:\.\d+)?)`,                                    // line total
+  'gi'
+);
+
+// Pattern C: total qty first, then price+total, then (container x per-unit) appears later
+const linePatternC = new RegExp(
+  String.raw`${POS_PREFIX}${POS_NUM}\s+([A-Z0-9.\-]+)\s+` +          // position + part
+  String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s*` +                         // total qty + total unit
+  EXTRA_L +
+  String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC|LB)\s+` + // unit price + unit
+  String.raw`([\d,]+(?:\.\d+)?)\s+` +                                // line total
+  EXTRA_L +
+  String.raw`(?:[\d,]+\.?\d*)\s+${UNIT_WORD}\s*x\s*` +               // (container qty + unit) x ...
+  String.raw`(?:[\d,]+\.?\d+)\s+[A-Z]+`,                             // per-unit qty + type
+  'gi'
+);
+
+const positionsFound = new Set();
+const lineItems = [];
+
+function pushItem(c){
+  const {position,partNumber,containerQty,perUnitQty,perUnitType,totalQty,totalUnit,unitPrice,priceUnit,lineTotal,matchIndex}=c;
+  let quantity, unit;
+  if(['CN','PC','CAT','TIN','BTL','BUC'].includes(priceUnit)){
+    quantity = containerQty || totalQty; unit = priceUnit;
+  }else if(['KG','GAL','PT','QT','FOZ','L','LB'].includes(priceUnit)){
+    quantity = totalQty; unit = priceUnit;
+  }else if(priceUnit === totalUnit){
+    quantity = totalQty; unit = priceUnit;
+  }else{
+    quantity = totalQty; unit = priceUnit;
+  }
+
+  lineItems.push({
+    invoice_number:invoiceNum,
+    invoice_date:invoiceDate,
+    invoice_total:invoiceTotal,
+    supplier:supplier,
+    position,
+    part_number:partNumber,
+    quantity, unit,
+    unit_price:unitPrice,
+    line_total:lineTotal,
+    net_weight:'', country_of_origin:'',
+    _matchIndex:matchIndex
+  });
+}
+
+// Matching loops
+let mA; while((mA=linePatternA.exec(sectionText))!==null){
+  const position=mA[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
+  pushItem({
+    position,
+    partNumber:(mA[2]||'').slice(0,64),
+    containerQty:(mA[3]||'').replace(/,/g,''),
+    perUnitQty:(mA[4]||'').replace(/,/g,''),
+    perUnitType:mA[5]||'',
+    totalQty:(mA[6]||'').replace(/,/g,''),
+    totalUnit:mA[7]||'',
+    unitPrice:(mA[8]||''),
+    priceUnit:mA[9]||'',
+    lineTotal:(mA[10]||'').replace(/,/g,''),
+    matchIndex:mA.index ?? 0
+  });
+}
+
+let mB; while((mB=linePatternB.exec(sectionText))!==null){
+  const position=mB[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
+  pushItem({
+    position,
+    partNumber:(mB[2]||'').slice(0,64),
+    containerQty:(mB[3]||'').replace(/,/g,''),
+    perUnitQty:'', perUnitType:'',
+    totalQty:(mB[4]||'').replace(/,/g,''),
+    totalUnit:mB[5]||'',
+    unitPrice:(mB[6]||''),
+    priceUnit:mB[7]||'',
+    lineTotal:(mB[8]||'').replace(/,/g,''),
+    matchIndex:mB.index ?? 0
+  });
+}
+
+let mC; while((mC=linePatternC.exec(sectionText))!==null){
+  const position=mC[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
+  pushItem({
+    position,
+    partNumber:(mC[2]||'').slice(0,64),
+    containerQty:'',
+    perUnitQty:'', perUnitType:'',
+    totalQty:(mC[3]||'').replace(/,/g,''),
+    totalUnit:mC[4]||'',
+    unitPrice:(mC[5]||''),
+    priceUnit:mC[6]||'',
+    lineTotal:(mC[7]||'').replace(/,/g,''),
+    matchIndex:mC.index ?? 0
+  });
+}
 
       const linePatternA = new RegExp(
         String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
