@@ -259,26 +259,44 @@
       const overallMatches=[...sectionText.matchAll(overallPattern)];
       if(overallMatches.length) invoiceTotal = overallMatches.at(-1)[1].replace(/,/g,'');
 
-      const UNIT_WORD = '(?:carton|bucket(?:s|\\(s\\))?|pail|tin|can|barrel|canister|cartridge|bottle(?:s|\\(s\\))?|piece(?:\\(s\\))?|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|Kilogramme)';
+      const UNIT_WORD =
+  '(?:carton|bucket(?:s|\\(s\\))?|pail|tin(?:s|\\(s\\))?|can(?:\\(s\\))?|barrel|canister|cartridge|bottle(?:s|\\(s\\))?|piece(?:\\(s\\))?|Kilogramme)';
+const EXTRA_L = String.raw`(?:\\s*[\\d.,]+\\s+L\\s*)*`;
 
-      const linePatternA = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
-        String.raw`x\s*([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
-        String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
-        String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
-        String.raw`([\d,]+\.?\d+)`,
-        'gi'
-      );
+const linePatternA = new RegExp(
+  String.raw`(\\d+)\\s+([A-Z0-9.\\-]+)\\s+` +
+  String.raw`([\\d,]+\\.?\\d*)\\s+${UNIT_WORD}\\s*` +
+  String.raw`x\\s*([\\d,]+\\.?\\d+)\\s+([A-Z]+)\\s*` +
+  String.raw`${EXTRA_L}` +
+  String.raw`([\\d,]+\\.?\\d+)\\s+([A-Z]+)\\s*` +
+  String.raw`${EXTRA_L}` +
+  String.raw`([\\d.,]+)\\s+USD\\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\\s+` +
+  String.raw`([\\d,]+\\.?\\d+)`,
+  'gi'
+);
 
-      const linePatternB = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +
-        String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
-        String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
-        String.raw`([\d,]+\.?\d+)`,
-        'gi'
-      );
+const linePatternB = new RegExp(
+  String.raw`(\\d+)\\s+([A-Z0-9.\\-]+)\\s+` +
+  String.raw`([\\d,]+\\.?\\d*)\\s+${UNIT_WORD}\\s*` +
+  String.raw`${EXTRA_L}` +
+  String.raw`([\\d,]+\\.?\\d+)\\s+([A-Z]+)\\s*` +
+  String.raw`${EXTRA_L}` +
+  String.raw`([\\d.,]+)\\s+USD\\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\\s+` +
+  String.raw`([\\d,]+\\.?\\d+)`,
+  'gi'
+);
 
-      const positionsFound = new Set();
+const linePatternC = new RegExp(
+  String.raw`(\\d+)\\s+([A-Z0-9.\\-]+)\\s+` +
+  String.raw`([\\d,]+\\.?\\d+)\\s+([A-Z]+)\\s*` +
+  String.raw`${EXTRA_L}` +
+  String.raw`([\\d.,]+)\\s+USD\\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\\s+` +
+  String.raw`([\\d,]+\\.?\\d+)\\s+` +
+  String.raw`${EXTRA_L}` +
+  String.raw`(?:[\\d,]+\\.?\\d*)\\s+${UNIT_WORD}\\s*x\\s*` +
+  String.raw`(?:[\\d,]+\\.?\\d+)\\s+[A-Z]+`,
+  'gi'
+);const positionsFound = new Set();
       const lineItems = [];
 
       function pushItem(c){
@@ -308,39 +326,53 @@
       }
 
       let mA; while((mA=linePatternA.exec(sectionText))!==null){
-        const position=mA[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
-        pushItem({
-          position,
-          partNumber:(mA[2]||'').slice(0,64),
-          containerQty:(mA[3]||'').replace(/,/g,''),
-          perUnitQty:(mA[4]||'').replace(/,/g,''),
-          perUnitType:mA[5]||'',
-          totalQty:(mA[6]||'').replace(/,/g,''),
-          totalUnit:mA[7]||'',
-          unitPrice:mA[8]||'',
-          priceUnit:mA[9]||'',
-          lineTotal:(mA[10]||'').replace(/,/g,''),
-          matchIndex:mA.index ?? 0
-        });
-      }
+  const position=mA[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
+  pushItem({
+    position,
+    partNumber:(mA[2]||'').slice(0,64),
+    containerQty:(mA[3]||'').replace(/,/g,''),
+    perUnitQty:(mA[4]||'').replace(/,/g,''),
+    perUnitType:mA[5]||'',
+    totalQty:(mA[6]||'').replace(/,/g,''),
+    totalUnit:mA[7]||'',
+    unitPrice:(mA[8]||''),
+    priceUnit:mA[9]||'',
+    lineTotal:(mA[10]||'').replace(/,/g,''),
+    matchIndex:mA.index ?? 0
+  });
+}
 
-      let mB; while((mB=linePatternB.exec(sectionText))!==null){
-        const position=mB[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
-        pushItem({
-          position,
-          partNumber:(mB[2]||'').slice(0,64),
-          containerQty:(mB[3]||'').replace(/,/g,''),
-          perUnitQty:'', perUnitType:'',
-          totalQty:(mB[4]||'').replace(/,/g,''),
-          totalUnit:mB[5]||'',
-          unitPrice:(mB[6]||''),
-          priceUnit:mB[7]||'',
-          lineTotal:(mB[8]||'').replace(/,/g,''),
-          matchIndex:mB.index ?? 0
-        });
-      }
+let mB; while((mB=linePatternB.exec(sectionText))!==null){
+  const position=mB[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
+  pushItem({
+    position,
+    partNumber:(mB[2]||'').slice(0,64),
+    containerQty:(mB[3]||'').replace(/,/g,''),
+    perUnitQty:'', perUnitType:'',
+    totalQty:(mB[4]||'').replace(/,/g,''),
+    totalUnit:mB[5]||'',
+    unitPrice:(mB[6]||''),
+    priceUnit:mB[7]||'',
+    lineTotal:(mB[8]||'').replace(/,/g,''),
+    matchIndex:mB.index ?? 0
+  });
+}
 
-      const enriched=[];
+let mC; while((mC=linePatternC.exec(sectionText))!==null){
+  const position=mC[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
+  pushItem({
+    position,
+    partNumber:(mC[2]||'').slice(0,64),
+    containerQty:'',
+    perUnitQty:'', perUnitType:'',
+    totalQty:(mC[3]||'').replace(/,/g,''),
+    totalUnit:mC[4]||'',
+    unitPrice:(mC[5]||''),
+    priceUnit:mC[6]||'',
+    lineTotal:(mC[7]||'').replace(/,/g,''),
+    matchIndex:mC.index ?? 0
+  });
+}      const enriched=[];
       for(let idx=0; idx<lineItems.length; idx++){
         const item=lineItems[idx];
         const startPos=item._matchIndex ?? 0;
