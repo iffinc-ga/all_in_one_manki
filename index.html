@@ -153,6 +153,9 @@
   let invoiceOrder = [];
   let uploadedPdfName = '';
 
+  // --- focus hint (to preserve keyboard flow across re-renders)
+  let focusHint = null; // { pos: '30', key: 'part_number' } or { pos: '30A', key: 'unit' }
+
   const uploadBox = document.getElementById('uploadBox');
   const fileInput = document.getElementById('fileInput');
   const headerWrap = document.querySelector('.table-header-wrapper');
@@ -459,6 +462,31 @@
   // ---- Tab order counter (for better keyboard navigation)
   let _tabCounter = 1;
 
+  // editable keys in natural order
+  const EDIT_KEYS = ['position','part_number','quantity','unit','unit_price','line_total','net_weight','country_of_origin'];
+  function nextKeyOf(k, dir){
+    const i = EDIT_KEYS.indexOf(k);
+    if(i===-1) return 'part_number';
+    const j = i + (dir>0?1:-1);
+    if(j<0) return EDIT_KEYS[0];
+    if(j>=EDIT_KEYS.length) return EDIT_KEYS[EDIT_KEYS.length-1];
+    return EDIT_KEYS[j];
+  }
+
+  function sanitizeId(s){ return String(s||'').replace(/[^A-Za-z0-9_-]/g,'_'); }
+
+  function tryApplyFocusHint(){
+    if(!focusHint || !currentInvoice) return;
+    const posId = sanitizeId(focusHint.pos);
+    const targetId = `cell-${posId}-${focusHint.key}`;
+    const el = document.getElementById(targetId);
+    if(el){
+      el.focus();
+      try{ el.select(); }catch(_){}
+    }
+    focusHint = null;
+  }
+
   function loadInvoiceData(){
     let items = allData.filter(d=>d.invoice_number===currentInvoice);
     if(items.length===0){ const meta={invoice_number:currentInvoice,invoice_date:'',invoice_total:'',supplier:''}; items=[{...meta,position:'',part_number:'',quantity:'',unit:'',unit_price:'',line_total:'',net_weight:'',country_of_origin:''}]; }
@@ -485,12 +513,15 @@
     document.getElementById('tableContainer').style.display='block';
 
     recomputeStats();
+
+    // restore intended focus if any
+    tryApplyFocusHint();
   }
 
   function renderRow(row, idx){
     const tr=document.createElement('tr');
 
-    // --- helper to move focus to next tab-indexed input
+    // --- helper to move focus to next tab-indexed input (fallback for Enter)
     function focusNext(current){
       const inputs = Array.from(document.querySelectorAll('#tableBody input:not([readonly])'));
       const i = inputs.indexOf(current);
@@ -500,24 +531,38 @@
     function cellInput(val, key, readonly=false){
       const td=document.createElement('td');
       const inp=document.createElement('input');
+      const posId = sanitizeId(row.position);
+      inp.id = `cell-${posId}-${key}`;
       inp.value = (val==null?'':String(val));
       if(readonly) inp.classList.add('readonly');
       inp.readOnly = readonly;
 
-      // ---- (1) Better tab/enter navigation
+      // ---- Better Tab/Shift+Tab & Enter navigation
       inp.setAttribute('tabindex', String(_tabCounter++));
+
+      // Enter: commit + move forward
       inp.addEventListener('keydown', (ev)=>{
         if(ev.key==='Enter'){
           ev.preventDefault();
-          ev.stopPropagation();
-          // Commit current change first
           if(!readonly) updateCell(idx, key, inp.value);
-          // then move
           focusNext(inp);
         }
       });
 
-      // commit on value change (blur or manual change)
+      // Tab / Shift+Tab: commit, re-render, restore focus to next/prev field
+      inp.addEventListener('keydown', (ev)=>{
+        if(ev.key === 'Tab' && !readonly){
+          ev.preventDefault();
+          // compute next field within the same row
+          const dir = ev.shiftKey ? -1 : 1;
+          const targetKey = nextKeyOf(key, dir);
+          // set focus hint BEFORE re-render
+          focusHint = { pos: String(row.position||''), key: targetKey };
+          updateCell(idx, key, inp.value);
+        }
+      });
+
+      // Commit on blur/change too (safety)
       inp.addEventListener('change',()=>{ updateCell(idx,key,inp.value); });
       td.appendChild(inp); return td;
     }
@@ -556,16 +601,18 @@
     const realIdx = sortedIdxMap[rowIndex];
     const recs = allData.filter(d=>d.invoice_number===currentInvoice);
 
-    // keep previous value for delta computations
     const prevVal = recs[realIdx][key];
-
-    // write the new value
     recs[realIdx][key]=value;
 
-    // ---- (2) If a STEEL or ALUMINUM subline's Line Total changes, reduce main line's Item Total by the delta
+    // If user changed the position value itself and we have a pending focus hint,
+    // update the hint's pos to the new value so we can still find the next cell.
+    if (key === 'position' && focusHint && String(focusHint.pos) === String(prevVal || '')) {
+      focusHint.pos = String(value || '');
+    }
+
+    // Adjust main line when a Steel (S) OR Aluminum (A) subline changes
     if (key === 'line_total') {
       const pos = String(recs[realIdx].position || '');
-      // S = Steel, A = Aluminum
       if (/[SA]$/i.test(pos)) {
         const basePos = pos.replace(/[SA]$/i, '');
         const parent = recs.find(r => String(r.position||'') === basePos);
@@ -594,6 +641,9 @@
     const newRow = { invoice_number:currentInvoice, invoice_date:base.invoice_date, invoice_total:base.invoice_total, supplier:base.supplier, position:insertPos, part_number:'', quantity:'', unit:'', unit_price:'', line_total:'', net_weight:'', country_of_origin:base.country_of_origin };
     const firstIdx = allData.findIndex(d=>d===base);
     allData.splice(firstIdx+1,0,newRow);
+
+    // after inserting, focus POS of the new row
+    focusHint = { pos: insertPos, key: 'position' };
     loadInvoiceData();
   }
 
@@ -613,8 +663,12 @@
     if(!currentInvoice){ showAlert('Select an invoice first','error'); return; }
     const items = allData.filter(d=>d.invoice_number===currentInvoice);
     const meta = items[0]||{};
-    const newRow = { invoice_number:currentInvoice, invoice_date:meta.invoice_date||'', invoice_total:meta.invoice_total||'', supplier:meta.supplier||'', position:'', part_number:'', quantity:'', unit:'', unit_price:'', line_total:'', net_weight:'', country_of_origin:meta.country_of_origin||'' };
-    allData.push(newRow); loadInvoiceData();
+    const newPos = ''; // user will type
+    const newRow = { invoice_number:currentInvoice, invoice_date:meta.invoice_date||'', invoice_total:meta.invoice_total||'', supplier:meta.supplier||'', position:newPos, part_number:'', quantity:'', unit:'', unit_price:'', line_total:'', net_weight:'', country_of_origin:meta.country_of_origin||'' };
+    allData.push(newRow);
+    // focus POS immediately
+    focusHint = { pos: newPos, key: 'position' };
+    loadInvoiceData();
   }
 
   function updateInvoiceField(field, value){
@@ -667,7 +721,7 @@
   }
 
   // ========================================
-  // DB LOAD (GITHUB RAW) & LOOKUPS
+  // DB LOAD (GITHUB RAW) & LOOKUPS (unchanged)
   // ========================================
 
   let mankiDb = null;
@@ -715,10 +769,9 @@
         steelAlumDb = XLSX.utils.sheet_to_json(workbook.Sheets['Sheet1']);
       } else throw new Error('Sheet1 not found');
 
-      // Load the MID sheet with exact headers
       if(workbook.SheetNames.includes('MID')){
         supplierMidDb = XLSX.utils.sheet_to_json(workbook.Sheets['MID'], {defval:''});
-        buildSupplierMidIndex(); // builds from MANUFACTURERNAME / MANUFACTURERMID
+        buildSupplierMidIndex();
       } else {
         supplierMidDb = [];
         supplierMidIndex = [];
@@ -776,7 +829,7 @@
     return type === 'Steel' ? 'STEEL GENERIC' : 'ALUM GENERIC';
   }
 
-  // ====== Supplier MID: exact headers + fuzzy matching (no hard-coded map) ======
+  // ====== Supplier MID fuzzy lookup (unchanged) ======
   function stripDiacritics(s){
     try { return s.normalize('NFKD').replace(/[\u0300-\u036f]/g,''); } catch(_) { return s; }
   }
@@ -801,6 +854,8 @@
     return (2*hit)/(A.length+B.length);
   }
 
+  let supplierMidDb = null;
+  let supplierMidIndex = [];
   function buildSupplierMidIndex(){
     supplierMidIndex = [];
     if(!Array.isArray(supplierMidDb)) return;
@@ -811,9 +866,7 @@
       const norm = normalizeSupplierName(rawName);
       supplierMidIndex.push({ raw: rawName, norm, cons: onlyConsonants(norm), mid: rawMid });
     });
-    console.log(`[MID] Indexed ${supplierMidIndex.length} manufacturer→MID entries (MANUFACTURERNAME / MANUFACTURERMID).`);
   }
-
   function scoreSupplierCandidate(qNorm, qRaw, rec){
     const exact = qNorm === rec.norm ? 1 : 0;
     const starts = rec.norm.startsWith(qNorm) ? 0.95 : 0;
@@ -829,14 +882,12 @@
     const rawContains = stripDiacritics(rec.raw).toLowerCase().includes(stripDiacritics(qRaw).toLowerCase()) ? 0.2 : 0;
     return Math.max(exact, starts, contains, dice, consDice) + shortBoost + rawContains;
   }
-
   function lookupSupplierMIDFromText(userSupplierText){
     if(!userSupplierText) return '';
     if(!supplierMidIndex.length) return '';
     const qRaw  = String(userSupplierText||'').trim();
     const qNorm = normalizeSupplierName(qRaw);
     if(!qNorm) return '';
-
     let best = { score: 0, mid: '' };
     for(const rec of supplierMidIndex){
       const s = scoreSupplierCandidate(qNorm, qRaw, rec);
@@ -846,7 +897,7 @@
     return best.score >= thresh ? best.mid : '';
   }
 
-  // === Export ALL invoices to Descartes template (SupplierMID wired) ===
+  // === Export ALL to Descartes (unchanged logic) ===
   function exportToDescartes(){
     if(!mankiDb || !htsCodesDb || !steelAlumDb){
       showAlert('Database not loaded yet. Please wait for it to load from GitHub.','error');
@@ -863,21 +914,18 @@
     });
 
     const exportRows = [];
-
     const roundWeight = (val) => {
       const num = parseFloat(val);
       if (isNaN(num)) return '';
       if (num < 1) return 1;
       return Math.round(num);
     };
-
     const currentUiSupplierByInvoice = {};
     try{
       const uiSupplier = document.getElementById('statSupplier')?.value || '';
       const uiInvoice  = document.getElementById('statInvoice')?.textContent || '';
       if(uiInvoice){ currentUiSupplierByInvoice[uiInvoice] = uiSupplier; }
     }catch(_){}
-
     items.forEach(rec=>{
       const inv = rec.invoice_number;
       if(!currentUiSupplierByInvoice[inv]) currentUiSupplierByInvoice[inv] = rec.supplier || '';
@@ -1072,7 +1120,7 @@
   }
 </script>
 
-<!-- ===== Runtime normalization helpers (for weird spacing in PDFs) ===== -->
+<!-- ===== Runtime normalization helpers (unchanged) ===== -->
 <script>
 (function(){
   function normalizeWeirdSpacing(s){
@@ -1125,7 +1173,7 @@
 })();
 </script>
 
-<!-- === Steel-first ordering for both UI and export (no UI changes) === -->
+<!-- === Steel-first ordering (unchanged) === -->
 <script>
 (function(){
   function _rowInfo(row){
