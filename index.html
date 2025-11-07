@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
   <title>Invoice PDF Parser & Editor — Steel/Aluminum Sublines</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -59,7 +59,7 @@
     .db-loading{background:#fff3cd;color:#856404}
     .db-error{background:#f8d7da;color:#721c24}
     .db-info{font-size:12px;color:#004085;margin-top:5px}
-  
+
     .table-header table, .table-body table{table-layout:fixed}
     .table-header th:nth-child(1), .table-body td:nth-child(1){width:44px!important}
     .table-header th:nth-child(2), .table-body td:nth-child(2){width:210px!important}
@@ -68,7 +68,7 @@
     .table-header th:nth-child(5), .table-body td:nth-child(5){width:120px!important}
     .table-header th:nth-child(6), .table-body td:nth-child(6){width:120px!important}
     .table-header th:nth-child(7), .table-body td:nth-child(7){width:96px!important}
-    .table-header th:nth-child(8), .table-body td:nth-child(8){width:64px!important}
+    .table-header th:nth-child(8), .table-body td:nth-child(8){width:80px!important}
     .table-header th:nth-child(9), .table-body td:nth-child(9){width:140px!important}
     .table-body td{padding:6px 6px}
     .table-body td input{width:100%;}
@@ -84,7 +84,7 @@
   <div class="db-section" id="dbSection">
     <strong>Database Status:</strong>
     <span class="db-status db-loading" id="dbStatus">Loading database from repository...</span>
-    <div class="db-info" id="dbInfo">Fetching updated_manki_db.xlsx from GitHub...</div>
+    <div class="db-info" id="dbInfo">Fetching updated_manki_db.xlsx...</div>
   </div>
 
   <div class="upload-section" id="uploadSection">
@@ -108,7 +108,7 @@
     <button class="btn-success" onclick="exportToExcel()">📥 Export All to Excel</button>
     <button class="btn-info" onclick="addBlankRowForCurrent()">➕ Add Blank Row</button>
     <button class="btn-primary" onclick="resetUpload()">📤 New Upload</button>
-    <span class="inline-help">Tip: Use <strong>Tab</strong>/<strong>Shift+Tab</strong> or <strong>Enter</strong> to move between fields.</span>
+    <span class="inline-help">Tip: Edit <strong>Supplier</strong> before export; SupplierMID will be looked up from the MID sheet.</span>
   </div>
 
   <div class="stats" id="stats">
@@ -618,14 +618,14 @@
   }
 
   // ========================================
-  // GITHUB DATABASE AUTO-LOAD & DESCARTES EXPORT
+  // DB LOAD (GITHUB RAW) & LOOKUPS
   // ========================================
-  
+
   let mankiDb = null;
   let htsCodesDb = null;
   let steelAlumDb = null;
 
-  // NEW: Supplier MID sheet + index
+  // MID sheet (uses MANUFACTURERNAME / MANUFACTURERMID)
   let supplierMidDb = null;
   let supplierMidIndex = [];
 
@@ -643,54 +643,51 @@
   async function loadDatabaseFromGitHub() {
     const { owner, repo, branch, filePath } = GITHUB_CONFIG;
     const dbUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
-    
     document.getElementById('dbStatus').textContent = 'Loading database...';
     document.getElementById('dbStatus').className = 'db-status db-loading';
-    document.getElementById('dbInfo').textContent = `Fetching from: ${dbUrl}`;
+    document.getElementById('dbInfo').textContent = `Fetching: ${dbUrl}`;
 
     try {
       const response = await fetch(dbUrl);
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-
       const arrayBuffer = await response.arrayBuffer();
       const data = new Uint8Array(arrayBuffer);
       const workbook = XLSX.read(data, {type:'array'});
-      
+
       if(workbook.SheetNames.includes('UPDATED_MANKI_DB')){
         mankiDb = XLSX.utils.sheet_to_json(workbook.Sheets['UPDATED_MANKI_DB']);
       } else throw new Error('UPDATED_MANKI_DB sheet not found');
-      
+
       if(workbook.SheetNames.includes('manki_hts_codes_with_uom')){
         htsCodesDb = XLSX.utils.sheet_to_json(workbook.Sheets['manki_hts_codes_with_uom']);
       } else throw new Error('manki_hts_codes_with_uom sheet not found');
-      
+
       if(workbook.SheetNames.includes('Sheet1')){
         steelAlumDb = XLSX.utils.sheet_to_json(workbook.Sheets['Sheet1']);
       } else throw new Error('Sheet1 not found');
 
-      // NEW: load MID sheet (sheet name: "MID")
+      // Load the MID sheet with exact headers
       if(workbook.SheetNames.includes('MID')){
-        supplierMidDb = XLSX.utils.sheet_to_json(workbook.Sheets['MID']);
-        buildSupplierMidIndex();
+        supplierMidDb = XLSX.utils.sheet_to_json(workbook.Sheets['MID'], {defval:''});
+        buildSupplierMidIndex(); // builds from MANUFACTURERNAME / MANUFACTURERMID
       } else {
         supplierMidDb = [];
         supplierMidIndex = [];
+        console.warn('[MID] Sheet "MID" not found.');
       }
-      
-      const midsCount = supplierMidIndex.length;
-      document.getElementById('dbStatus').textContent = `Database loaded ✓ (${mankiDb.length} parts, ${htsCodesDb.length} HTS, ${steelAlumDb.length} mappings, ${midsCount} MIDs)`;
+
+      document.getElementById('dbStatus').textContent = `Database loaded ✓ (${mankiDb.length} parts, ${htsCodesDb.length} HTS, ${steelAlumDb.length} mappings, ${supplierMidIndex.length} MIDs)`;
       document.getElementById('dbStatus').className = 'db-status db-loaded';
-      document.getElementById('dbInfo').textContent = `Loaded: ${new Date().toLocaleString()} | Source: GitHub Repository`;
-      console.log('Database loaded successfully');
+      document.getElementById('dbInfo').textContent = `Loaded at ${new Date().toLocaleString()}`;
     } catch(err) {
       console.error('Database load error:', err);
       document.getElementById('dbStatus').textContent = 'Database load failed ✗';
       document.getElementById('dbStatus').className = 'db-status db-error';
-      document.getElementById('dbInfo').innerHTML = `<strong>Error:</strong> ${err.message}<br><strong>Fix:</strong> Update GITHUB_CONFIG in HTML file`;
+      document.getElementById('dbInfo').innerHTML = `<strong>Error:</strong> ${err.message}<br><strong>Fix:</strong> Check GITHUB_CONFIG or network.`;
     }
   }
 
-  // === Base 4–5 char part number extractor for main lines ===
+  // ===== Helper lookups (unchanged) =====
   function extractBasePartNumber(fullPartNum){
     const s = String(fullPartNum || '').trim();
     const head = s.split('.')[0];
@@ -730,80 +727,77 @@
     return type === 'Steel' ? 'STEEL GENERIC' : 'ALUM GENERIC';
   }
 
-  // ==============================
-  // NEW: SupplierMID fuzzy lookup
-  // ==============================
-  function buildSupplierMidIndex(){
-    supplierMidIndex = [];
-    if(!Array.isArray(supplierMidDb)) return;
-
-    // detect columns (be tolerant to headers)
-    const sample = supplierMidDb[0] || {};
-    const keys = Object.keys(sample);
-
-    const supplierKey = keys.find(k => /supplier.*name|supplier/i.test(k)) || 'Supplier';
-    const midKey = keys.find(k => /\bmid\b|supplier\s*mid|seller\s*mid/i.test(k)) || 'MID';
-
-    supplierMidDb.forEach(row=>{
-      const name = String(row[supplierKey] ?? row['Supplier'] ?? '').trim();
-      const mid  = String(row[midKey] ?? row['MID'] ?? '').trim();
-      if(name && mid){
-        supplierMidIndex.push({ name, norm: normalizeSupplierName(name), mid });
-      }
-    });
+  // ====== Supplier MID: exact headers + fuzzy matching (no hard-coded map) ======
+  function stripDiacritics(s){
+    try { return s.normalize('NFKD').replace(/[\u0300-\u036f]/g,''); } catch(_) { return s; }
   }
-
   function normalizeSupplierName(s){
-    return String(s||'')
+    return stripDiacritics(String(s||''))
       .toLowerCase()
       .replace(/&/g,' and ')
-      .replace(/\b(gmbh|co\.?|kg|llc|inc\.?|ltd\.?|company|coatings|industrie|lackfabrik|the)\b/gi,'')
+      .replace(/\b(gmbh|co\.?|kg|llc|inc\.?|ltd\.?|company|coatings|industrie|lackfabrik|the|and|of|factory|fabrik|sa|ag|gebr|geb\.)\b/gi,'')
       .replace(/[^a-z0-9]+/g,'')
       .trim();
   }
-
+  function onlyConsonants(s){ return String(s||'').replace(/[aeiou]/gi,''); }
   function diceCoefficient(a,b){
     if(!a || !b) return 0;
     if(a === b) return 1;
-    const bigrams = str => {
-      const arr = [];
-      for(let i=0;i<a.length-1;i++){ arr.push(a.slice(i,i+2)); }
-      return arr;
-    };
-    const A = bigrams(a);
-    const B = bigrams(b);
-    if(A.length === 0 || B.length === 0) return 0;
-    let intersection = 0;
-    const counts = {};
-    A.forEach(bg => counts[bg] = (counts[bg]||0)+1);
-    B.forEach(bg => { if(counts[bg]){ intersection++; counts[bg]--; } });
-    return (2*intersection) / (A.length + B.length);
+    const grams = t => { const r=[]; for(let i=0;i<t.length-1;i++) r.push(t.slice(i,i+2)); return r; };
+    const A=grams(a), B=grams(b);
+    if(!A.length || !B.length) return 0;
+    const map={}; let hit=0;
+    A.forEach(g=>map[g]=(map[g]||0)+1);
+    B.forEach(g=>{ if(map[g]){ hit++; map[g]--; }});
+    return (2*hit)/(A.length+B.length);
   }
 
-  function lookupSupplierMID(supplierName){
-    if(!supplierName) return '';
+  function buildSupplierMidIndex(){
+    supplierMidIndex = [];
+    if(!Array.isArray(supplierMidDb)) return;
+    supplierMidDb.forEach(row=>{
+      const rawName = String(row['MANUFACTURERNAME'] ?? '').trim();
+      const rawMid  = String(row['MANUFACTURERMID'] ?? '').trim();
+      if(!rawName || !rawMid) return;
+      const norm = normalizeSupplierName(rawName);
+      supplierMidIndex.push({ raw: rawName, norm, cons: onlyConsonants(norm), mid: rawMid });
+    });
+    console.log(`[MID] Indexed ${supplierMidIndex.length} manufacturer→MID entries (MANUFACTURERNAME / MANUFACTURERMID).`);
+  }
+
+  function scoreSupplierCandidate(qNorm, qRaw, rec){
+    const exact = qNorm === rec.norm ? 1 : 0;
+    const starts = rec.norm.startsWith(qNorm) ? 0.95 : 0;
+    const contains = rec.norm.includes(qNorm) || qNorm.includes(rec.norm) ? 0.85 : 0;
+    const dice = diceCoefficient(qNorm, rec.norm);
+    const qCons = onlyConsonants(qNorm);
+    const consDice = diceCoefficient(qCons, rec.cons);
+    let shortBoost = 0;
+    if(qNorm.length >= 3 && qNorm.length <= 6){
+      if(rec.norm.includes(qNorm)) shortBoost = 0.25;
+      else if(rec.cons.includes(qCons)) shortBoost = 0.18;
+    }
+    const rawContains = stripDiacritics(rec.raw).toLowerCase().includes(stripDiacritics(qRaw).toLowerCase()) ? 0.2 : 0;
+    return Math.max(exact, starts, contains, dice, consDice) + shortBoost + rawContains;
+  }
+
+  function lookupSupplierMIDFromText(userSupplierText){
+    if(!userSupplierText) return '';
     if(!supplierMidIndex.length) return '';
-    const q = normalizeSupplierName(supplierName);
-    if(!q) return '';
+    const qRaw  = String(userSupplierText||'').trim();
+    const qNorm = normalizeSupplierName(qRaw);
+    if(!qNorm) return '';
 
     let best = { score: 0, mid: '' };
-
     for(const rec of supplierMidIndex){
-      // quick exact/contains boosts
-      const exact = q === rec.norm ? 1 : 0;
-      const contains = rec.norm.includes(q) || q.includes(rec.norm) ? 0.85 : 0;
-      const dice = diceCoefficient(q, rec.norm);
-      const score = Math.max(exact, contains, dice);
-      if(score > best.score){
-        best = { score, mid: rec.mid };
-      }
+      const s = scoreSupplierCandidate(qNorm, qRaw, rec);
+      if(s > best.score) best = { score: s, mid: rec.mid };
     }
-
-    // pick if confident enough; 0.35 works well for short names like "finalin"
-    return best.score >= 0.35 ? best.mid : '';
+    const thresh = (qNorm.length <= 6) ? 0.38 : 0.45;
+    return best.score >= thresh ? best.mid : '';
   }
 
-  // === Export ALL invoices to Descartes template (global sort, S before A) ===
+  // === Export ALL invoices to Descartes template (SupplierMID wired) ===
   function exportToDescartes(){
     if(!mankiDb || !htsCodesDb || !steelAlumDb){
       showAlert('Database not loaded yet. Please wait for it to load from GitHub.','error');
@@ -827,6 +821,20 @@
       if (num < 1) return 1;
       return Math.round(num);
     };
+
+    // Capture the *current* UI supplier per invoice at export time
+    const currentUiSupplierByInvoice = {};
+    try{
+      const uiSupplier = document.getElementById('statSupplier')?.value || '';
+      const uiInvoice  = document.getElementById('statInvoice')?.textContent || '';
+      if(uiInvoice){ currentUiSupplierByInvoice[uiInvoice] = uiSupplier; }
+    }catch(_){}
+
+    // Also infer from items to cover invoices not currently selected
+    items.forEach(rec=>{
+      const inv = rec.invoice_number;
+      if(!currentUiSupplierByInvoice[inv]) currentUiSupplierByInvoice[inv] = rec.supplier || '';
+    });
 
     items.forEach(item => {
       const isSteelLine = String(item.position||'').endsWith('S') || item.part_number === 'STEEL';
@@ -853,15 +861,13 @@
         supplierPartNum = subNum;
       }
 
+      const supplierForInvoice = currentUiSupplierByInvoice[item.invoice_number] || item.supplier || '';
       const row = {
         'InvoiceNumber': item.invoice_number,
         'InvoiceDate': item.invoice_date,
         'InvoiceTotal': item.invoice_total,
-
-        // NEW: SupplierMID via fuzzy lookup using current (possibly edited) supplier name
-        'SupplierMID': '',
-
-        'SupplierName': item.supplier,
+        'SupplierMID': lookupSupplierMIDFromText(supplierForInvoice), // <<< MAIN CHANGE
+        'SupplierName': supplierForInvoice,
         'BuyerPartNumber': buyerPartNum,
         'SupplierPartNumber': supplierPartNum,
         'Quantity': item.quantity,
@@ -946,17 +952,14 @@
         '5 Value': ''
       };
 
-      // === NEW: set SupplierMID (only change requested)
-      row['SupplierMID'] = lookupSupplierMID(item.supplier);
-
       if (isSteelLine || isAlumLine) {
         row['NetWeight'] = roundWeight(item.quantity);
       }
 
       const basePartNum = extractBasePartNumber(item.part_number);
       const tariffs = lookupTariffs(basePartNum);
-
       const tariffFields = ['TariffNumber', 'SecondaryTariffNumber', 'ThirdTariffNumber', '4TariffNumber', '5TariffNumber'];
+
       tariffs.forEach((tariff, idx) => {
         if(idx < tariffFields.length){
           row[tariffFields[idx]] = tariff;
@@ -1008,23 +1011,21 @@
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(exportRows);
     XLSX.utils.book_append_sheet(wb, ws, 'Descartes Export');
-    
+
     const out = XLSX.write(wb, {type:'array', bookType:'xlsx'});
     const blob = new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = (uploadedPdfName?uploadedPdfName+'_':'')+'descartes_export.xlsx';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    
+
     showAlert('Descartes template exported successfully!', 'success');
   }
 </script>
 
-<!-- ==== Runtime “no-UI-change” patch: normalize only when needed ==== -->
+<!-- ===== Runtime normalization helpers (for weird spacing in PDFs) ===== -->
 <script>
 (function(){
   function normalizeWeirdSpacing(s){
