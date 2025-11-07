@@ -47,7 +47,7 @@
     .table-body td{padding:10px 8px;border-bottom:1px solid #dee2e6;background:#fff}
     .table-body tr:hover td{background:#f8f9fa}
     .table-body td input{width:100%;padding:6px;border:1px solid #ced4da;border-radius:3px;font-size:13px}
-    .table-body td input:focus{outline:none;border-color:#667eea}
+    .table-body td input:focus{outline:none;border-color:#667eea; box-shadow:0 0 0 2px rgba(102,126,234,.15)}
     .readonly{background:#e9ecef!important}
     .actions{text-align:center}
     .actions button{padding:4px 8px;font-size:12px;margin:0 2px}
@@ -108,7 +108,7 @@
     <button class="btn-success" onclick="exportToExcel()">📥 Export All to Excel</button>
     <button class="btn-info" onclick="addBlankRowForCurrent()">➕ Add Blank Row</button>
     <button class="btn-primary" onclick="resetUpload()">📤 New Upload</button>
-    <span class="inline-help">Tip: Edit <strong>Supplier</strong> before export; SupplierMID will be looked up from the MID sheet.</span>
+    <span class="inline-help">Tip: Use Tab/Shift+Tab or Enter to move between fields. Edit <strong>Supplier</strong> before export.</span>
   </div>
 
   <div class="stats" id="stats">
@@ -259,10 +259,10 @@
       const overallMatches=[...sectionText.matchAll(overallPattern)];
       if(overallMatches.length) invoiceTotal = overallMatches.at(-1)[1].replace(/,/g,'');
 
-      const UNIT_WORD = '(?:carton|bucket(?:s|\\(s\\))?|barrel|canister|cartridge|bottle(?:s|\\(s\\))?|piece(?:\\(s\\))?|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|Kilogramme)';
+      const UNIT_WORD = '(?:carton|bucket(?:s|\\(s\\))?|pail|tin|can|barrel|canister|cartridge|bottle(?:s|\\(s\\))?|piece(?:\\(s\\))?|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|Kilogramme)';
 
       const linePatternA = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)(?:[^\n]*\n){0,3}?([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
+        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
         String.raw`x\s*([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
         String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
         String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
@@ -271,7 +271,7 @@
       );
 
       const linePatternB = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)(?:[^\n]*\n){0,3}?([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +
+        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +
         String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
         String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
         String.raw`([\d,]+\.?\d+)`,
@@ -456,6 +456,9 @@
     document.getElementById('tableContainer').style.display='none';
   }
 
+  // ---- Tab order counter (for better keyboard navigation)
+  let _tabCounter = 1;
+
   function loadInvoiceData(){
     let items = allData.filter(d=>d.invoice_number===currentInvoice);
     if(items.length===0){ const meta={invoice_number:currentInvoice,invoice_date:'',invoice_total:'',supplier:''}; items=[{...meta,position:'',part_number:'',quantity:'',unit:'',unit_price:'',line_total:'',net_weight:'',country_of_origin:''}]; }
@@ -475,6 +478,7 @@
 
     const tbody=document.getElementById('tableBody');
     tbody.innerHTML='';
+    _tabCounter = 1; // reset sequence on every render
     items.forEach((row, idx)=>{ tbody.appendChild(renderRow(row, idx)); });
 
     document.getElementById('stats').style.display='grid';
@@ -486,12 +490,34 @@
   function renderRow(row, idx){
     const tr=document.createElement('tr');
 
+    // --- helper to move focus to next tab-indexed input
+    function focusNext(current){
+      const inputs = Array.from(document.querySelectorAll('#tableBody input:not([readonly])'));
+      const i = inputs.indexOf(current);
+      if(i>=0 && i<inputs.length-1){ inputs[i+1].focus(); inputs[i+1].select?.(); }
+    }
+
     function cellInput(val, key, readonly=false){
       const td=document.createElement('td');
       const inp=document.createElement('input');
       inp.value = (val==null?'':String(val));
       if(readonly) inp.classList.add('readonly');
       inp.readOnly = readonly;
+
+      // ---- (1) Better tab/enter navigation
+      inp.setAttribute('tabindex', String(_tabCounter++));
+      inp.addEventListener('keydown', (ev)=>{
+        if(ev.key==='Enter'){
+          ev.preventDefault();
+          ev.stopPropagation();
+          // Commit current change first
+          if(!readonly) updateCell(idx, key, inp.value);
+          // then move
+          focusNext(inp);
+        }
+      });
+
+      // commit on value change (blur or manual change)
       inp.addEventListener('change',()=>{ updateCell(idx,key,inp.value); });
       td.appendChild(inp); return td;
     }
@@ -529,7 +555,30 @@
 
     const realIdx = sortedIdxMap[rowIndex];
     const recs = allData.filter(d=>d.invoice_number===currentInvoice);
+
+    // keep previous value for delta computations
+    const prevVal = recs[realIdx][key];
+
+    // write the new value
     recs[realIdx][key]=value;
+
+    // ---- (2) If a STEEL or ALUMINUM subline's Line Total changes, reduce main line's Item Total by the delta
+    if (key === 'line_total') {
+      const pos = String(recs[realIdx].position || '');
+      // S = Steel, A = Aluminum
+      if (/[SA]$/i.test(pos)) {
+        const basePos = pos.replace(/[SA]$/i, '');
+        const parent = recs.find(r => String(r.position||'') === basePos);
+        if (parent) {
+          const parentTotal = parseFloatSafe(parent.line_total) || 0;
+          const oldSub = parseFloatSafe(prevVal) || 0;
+          const newSub = parseFloatSafe(value) || 0;
+          const adjusted = parentTotal - (newSub - oldSub);
+          parent.line_total = fmt2(Math.max(0, adjusted));
+        }
+      }
+    }
+
     loadInvoiceData();
   }
 
@@ -822,7 +871,6 @@
       return Math.round(num);
     };
 
-    // Capture the *current* UI supplier per invoice at export time
     const currentUiSupplierByInvoice = {};
     try{
       const uiSupplier = document.getElementById('statSupplier')?.value || '';
@@ -830,7 +878,6 @@
       if(uiInvoice){ currentUiSupplierByInvoice[uiInvoice] = uiSupplier; }
     }catch(_){}
 
-    // Also infer from items to cover invoices not currently selected
     items.forEach(rec=>{
       const inv = rec.invoice_number;
       if(!currentUiSupplierByInvoice[inv]) currentUiSupplierByInvoice[inv] = rec.supplier || '';
@@ -866,7 +913,7 @@
         'InvoiceNumber': item.invoice_number,
         'InvoiceDate': item.invoice_date,
         'InvoiceTotal': item.invoice_total,
-        'SupplierMID': lookupSupplierMIDFromText(supplierForInvoice), // <<< MAIN CHANGE
+        'SupplierMID': lookupSupplierMIDFromText(supplierForInvoice),
         'SupplierName': supplierForInvoice,
         'BuyerPartNumber': buyerPartNum,
         'SupplierPartNumber': supplierPartNum,
