@@ -60,27 +60,16 @@
     .db-error{background:#f8d7da;color:#721c24}
     .db-info{font-size:12px;color:#004085;margin-top:5px}
   
-    /* === Column alignment + tighter widths === */
     .table-header table, .table-body table{table-layout:fixed}
-    /* POS */
     .table-header th:nth-child(1), .table-body td:nth-child(1){width:44px!important}
-    /* Part Number */
     .table-header th:nth-child(2), .table-body td:nth-child(2){width:210px!important}
-    /* Quantity */
     .table-header th:nth-child(3), .table-body td:nth-child(3){width:80px!important}
-    /* Unit */
     .table-header th:nth-child(4), .table-body td:nth-child(4){width:56px!important}
-    /* Unit Price */
     .table-header th:nth-child(5), .table-body td:nth-child(5){width:120px!important}
-    /* Line Total */
     .table-header th:nth-child(6), .table-body td:nth-child(6){width:120px!important}
-    /* Net Weight */
     .table-header th:nth-child(7), .table-body td:nth-child(7){width:96px!important}
-    /* Country */
     .table-header th:nth-child(8), .table-body td:nth-child(8){width:64px!important}
-    /* Actions */
     .table-header th:nth-child(9), .table-body td:nth-child(9){width:140px!important}
-
     .table-body td{padding:6px 6px}
     .table-body td input{width:100%;}
   </style>
@@ -214,7 +203,7 @@
       }
 
       if(!fullText.trim()){
-        showAlert('⚠️ The PDF had no extractable text (it may be scanned). Try an OCR'd copy.','error');
+        showAlert('⚠️ The PDF had no extractable text (it may be scanned). Try an OCR’d copy.','error');
         document.getElementById('uploadSection').style.display='block';
         return;
       }
@@ -260,22 +249,18 @@
       const invoiceDate = dateMatch ? dateMatch[1] : '';
 
       const headerSlice = sectionText.substring(0,1200);
-      // Try to spot supplier name (loose)
       let supplier='';
       const supplierPattern=/(Rüdt Industrielacke GmbH & Co\. KG|Norix Lackfabrik GmbH & Co\. KG|Finalin GmbH & Co\. KG|Mankiewicz Coatings, LLC)/i;
       const supplierMatch = headerSlice.match(supplierPattern);
       if(supplierMatch){ supplier = supplierMatch[1].trim(); }
 
-      // Conservative attempt to find an invoice total (fallback editable in UI)
       let invoiceTotal='';
       const overallPattern=/Overall\s+amount\s+in\s+USD\s+([\d,]+\.?\d*)/gi;
       const overallMatches=[...sectionText.matchAll(overallPattern)];
       if(overallMatches.length) invoiceTotal = overallMatches.at(-1)[1].replace(/,/g,'');
 
-      // ==== LINE PARSING ====
       const UNIT_WORD = '(?:carton|bucket(?:s|\\(s\\))?|pail|tin|can|barrel|canister|cartridge|bottle(?:s|\\(s\\))?|piece(?:\\(s\\))?|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|Kilogramme)';
 
-      // With "x ..." form
       const linePatternA = new RegExp(
         String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
         String.raw`x\s*([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
@@ -285,7 +270,6 @@
         'gi'
       );
 
-      // No "x ..."
       const linePatternB = new RegExp(
         String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +
         String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
@@ -294,223 +278,356 @@
         'gi'
       );
 
-      const STEEL_ALUM_SUBLINE =
-        /(\d+[SA])\s*(?:9903\.81\.91\s*-\s*Steel\s*Packaging|9903\.85\.08\s*-\s*Aluminum\s*Content(?:\s*\(in\s*metallic\s*paint\))?)\s+([\d,]+\.?\d*)\s+(KG)\s+Country\s+of\s+origin\s+([A-Z]{2})\s*product\s+of\s+([A-Z]{2})/gi;
+      const positionsFound = new Set();
+      const lineItems = [];
 
-      const foundItems = [];
-      let match;
-      while((match = linePatternA.exec(sectionText))){
-        const pos = match[1], pn = match[2], qty = match[3], xVal = match[4], nwUnit = match[5],
-              nwVal = match[6], nwUnit2 = match[7], uprice = match[8], unit = match[9], lTotal = match[10];
-        foundItems.push({position:pos,part_number:pn,quantity:qty,net_weight_x:xVal,unit,unit_price:uprice,line_total:lTotal,country_of_origin:'',net_weight:xVal});
-      }
-      while((match = linePatternB.exec(sectionText))){
-        const pos = match[1], pn = match[2], qty = match[3], nwVal = match[4], nwUnit = match[5], uprice = match[6], unit = match[7], lTotal = match[8];
-        foundItems.push({position:pos,part_number:pn,quantity:qty,net_weight_x:nwVal,unit,unit_price:uprice,line_total:lTotal,country_of_origin:'',net_weight:nwVal});
-      }
+      function pushItem(c){
+        const {position,partNumber,containerQty,perUnitQty,perUnitType,totalQty,totalUnit,unitPrice,priceUnit,lineTotal,matchIndex}=c;
+        let quantity, unit;
+        if(['CN','PC','CAT','TIN','BTL','BUC'].includes(priceUnit)){
+          quantity = containerQty || totalQty; unit = priceUnit;
+        }else if(['KG','GAL','PT','QT','FOZ','L'].includes(priceUnit)){
+          quantity = totalQty; unit = priceUnit;
+        }else if(priceUnit === totalUnit){
+          quantity = totalQty; unit = priceUnit;
+        }else{ quantity = totalQty; unit = priceUnit; }
 
-      const subItems = [];
-      while((match = STEEL_ALUM_SUBLINE.exec(sectionText))){
-        const subPos = match[1], subQty = match[2], subUnit = match[3], originCountry = match[4], prodCountry = match[5];
-        const type = /S$/i.test(subPos) ? 'STEEL' : 'ALUMINUM';
-        subItems.push({position:subPos,part_number:type,quantity:subQty,net_weight:subQty,unit:subUnit,unit_price:'0',line_total:'0',country_of_origin:originCountry});
-      }
-
-      const merged = [];
-      foundItems.forEach(item => { merged.push(item); });
-      subItems.forEach(sub => {
-        const base = String(sub.position||'').replace(/[SA]$/i,'');
-        const idx = merged.findIndex(x => x.position === base);
-        if (idx >= 0) merged.splice(idx + 1, 0, sub);
-        else merged.push(sub);
-      });
-
-      merged.forEach(item => {
-        allData.push({
-          invoice_number: invoiceNum,
-          invoice_date: invoiceDate,
-          invoice_total: invoiceTotal,
-          supplier: supplier,
-          ...item
+        lineItems.push({
+          invoice_number:invoiceNum,
+          invoice_date:invoiceDate,
+          invoice_total:invoiceTotal,
+          supplier:supplier,
+          position,
+          part_number:partNumber,
+          quantity, unit,
+          unit_price:unitPrice,
+          line_total:lineTotal,
+          net_weight:'', country_of_origin:'',
+          _matchIndex:matchIndex
         });
-      });
-    });
+      }
 
-    console.log('Parsed data:', allData);
+      let mA; while((mA=linePatternA.exec(sectionText))!==null){
+        const position=mA[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
+        pushItem({
+          position,
+          partNumber:(mA[2]||'').slice(0,64),
+          containerQty:(mA[3]||'').replace(/,/g,''),
+          perUnitQty:(mA[4]||'').replace(/,/g,''),
+          perUnitType:mA[5]||'',
+          totalQty:(mA[6]||'').replace(/,/g,''),
+          totalUnit:mA[7]||'',
+          unitPrice:mA[8]||'',
+          priceUnit:mA[9]||'',
+          lineTotal:(mA[10]||'').replace(/,/g,''),
+          matchIndex:mA.index ?? 0
+        });
+      }
+
+      let mB; while((mB=linePatternB.exec(sectionText))!==null){
+        const position=mB[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
+        pushItem({
+          position,
+          partNumber:(mB[2]||'').slice(0,64),
+          containerQty:(mB[3]||'').replace(/,/g,''),
+          perUnitQty:'', perUnitType:'',
+          totalQty:(mB[4]||'').replace(/,/g,''),
+          totalUnit:mB[5]||'',
+          unitPrice:(mB[6]||''),
+          priceUnit:mB[7]||'',
+          lineTotal:(mB[8]||'').replace(/,/g,''),
+          matchIndex:mB.index ?? 0
+        });
+      }
+
+      const enriched=[];
+      for(let idx=0; idx<lineItems.length; idx++){
+        const item=lineItems[idx];
+        const startPos=item._matchIndex ?? 0;
+        const endPos = idx < lineItems.length-1 ? (lineItems[idx+1]._matchIndex ?? (startPos+2000)) : (startPos+3000);
+        const itemSection = sectionText.substring(startPos, Math.min(endPos, sectionText.length));
+
+        const weightMatch=itemSection.match(/([\d,.]+)\s+L\s+([\d,.]+)\s+L/);
+        if(weightMatch){ item.net_weight=(weightMatch[2]||'').replace(/,/g,''); }
+
+        const cooMatch=itemSection.match(/Country\s+of\s+origin:\s*([^\n]+?)(?:\s|$)/i);
+        if(cooMatch){ let country=(cooMatch[1]||'').trim();
+          const lc=country.toLowerCase(); if(lc.includes('germany')) country='DE'; else if(lc.includes('japan')) country='JP'; else if(lc.includes('netherlands')) country='NL'; else if(lc.includes('united')&&lc.includes('kingdom')) country='GB';
+          item.country_of_origin=country; }
+
+        const steelBlockMatch = itemSection.match(/9903\.81\.91\s*-\s*Steel\s*Packaging([\s\S]*?)(?:9903\.85\.08|Total\s+invoice\s+value|Country\s+of\s+origin|Net\s+product\s+value|$)/i);
+        let steelWeightKG = NaN, steelCustomsUSD = NaN;
+        if(steelBlockMatch){
+          const steelBlock = steelBlockMatch[1];
+          const w1 = steelBlock.match(/Total\s+net\s+steel\s+weight\s+per\s+KG:\s*([\d,.]+)/i);
+          if(w1) steelWeightKG = parseFloatSafe(w1[1]);
+          if(isNaN(steelWeightKG)){
+            const cpcs = steelBlock.match(/Steel\s+content\s+per\s+PCS:\s*([\d,.]+)\s*KG/i);
+            const qpcs = steelBlock.match(/Quantity\s+per\s*PCS:\s*([\d,.]+)/i);
+            if(cpcs && qpcs){ steelWeightKG = parseFloatSafe(cpcs[1]) * parseFloatSafe(qpcs[1]); }
+          }
+          const cval = steelBlock.match(/Total\s+customs\s+value:\s*([\d,.]+)\s*USD/i);
+          if(cval) steelCustomsUSD = parseFloatSafe(cval[1]);
+        }
+
+        const alumBlockMatch = itemSection.match(/9903\.85\.08\s*-\s*Aluminum\s*Content[\s\S]*?(?:Total\s+invoice\s+value|Country\s+of\s+origin|Net\s+product\s+value|$)/i);
+        let alumQty = NaN, alumCustomsUSD = NaN, alumUnit='KG';
+        if(alumBlockMatch){
+          const alumBlock = alumBlockMatch[0];
+          const aq = alumBlock.match(/Total\s+aluminum\s+content:\s*([\d,.]+)/i);
+          if(aq) alumQty = parseFloatSafe(aq[1]);
+          const cvalA = alumBlock.match(/Total\s+customs\s+value:\s*([\d,.]+)\s*USD/i);
+          if(cvalA) alumCustomsUSD = parseFloatSafe(cvalA[1]);
+        }
+
+        let mainLineTotal = parseFloatSafe(item.line_total);
+        const steelAdd = isNaN(steelCustomsUSD)?0:steelCustomsUSD;
+        const alumAdd  = isNaN(alumCustomsUSD)?0:alumCustomsUSD;
+        if(!isNaN(mainLineTotal) && (steelAdd>0 || alumAdd>0)){
+          mainLineTotal = Math.max(0, mainLineTotal - steelAdd - alumAdd);
+          item.line_total = fmt2(mainLineTotal);
+        }
+
+        enriched.push(item);
+
+        if(steelAdd>0){
+          enriched.push({
+            invoice_number: invoiceNum,
+            invoice_date: invoiceDate,
+            invoice_total: invoiceTotal,
+            supplier: supplier,
+            position: `${item.position}S`,
+            part_number: `Steel - ${item.part_number}`.slice(0,64),
+            quantity: isNaN(steelWeightKG)?'':fmt2(steelWeightKG),
+            unit: 'KG',
+            unit_price: '',
+            line_total: fmt2(steelCustomsUSD),
+            net_weight: '',
+            country_of_origin: item.country_of_origin || ''
+          });
+        }
+
+        if(alumAdd>0){
+          enriched.push({
+            invoice_number: invoiceNum,
+            invoice_date: invoiceDate,
+            invoice_total: invoiceTotal,
+            supplier: supplier,
+            position: `${item.position}A`,
+            part_number: `Aluminum - ${item.part_number}`.slice(0,64),
+            quantity: isNaN(alumQty)?'':fmt2(alumQty),
+            unit: alumUnit,
+            unit_price: '',
+            line_total: fmt2(alumCustomsUSD),
+            net_weight: '',
+            country_of_origin: item.country_of_origin || ''
+          });
+        }
+      }
+
+      enriched.forEach(it=>{ delete it._matchIndex; });
+      if(enriched.length===0){
+        enriched.push({invoice_number:invoiceNum,invoice_date:invoiceDate,invoice_total:invoiceTotal,supplier:supplier,position:'',part_number:'',quantity:'',unit:'',unit_price:'',line_total:'',net_weight:'',country_of_origin:''});
+      }
+
+      allData.push(...enriched);
+    });
+  }
+
+  function _rankSuffix(s){ return s===''?0:(s==='S'?1:2); }
+  function _parsePos(p){
+    const m=String(p||'').match(/^(\d+(?:[.,]\d+)?)([A-Za-z]?)$/);
+    if(!m) return {n:999999, s:''};
+    return { n: parseFloat(String(m[1]).replace(',', '.')), s:(m[2]||'').toUpperCase() };
   }
 
   function setupInterface(){
-    document.getElementById('controls').style.display='flex';
-    document.getElementById('stats').style.display='grid';
-    document.getElementById('tableContainer').style.display='block';
-    const sel = document.getElementById('invoiceSelect'); sel.innerHTML='<option value="">Select an invoice...</option>';
-    invoiceOrder.forEach(inv=>{ const opt=document.createElement('option'); opt.value=inv; opt.textContent=`Invoice ${inv}`; sel.appendChild(opt); });
-    sel.onchange = () => { currentInvoice = sel.value; renderTable(); };
-    if(invoiceOrder.length>0){ currentInvoice = invoiceOrder[0]; sel.value=currentInvoice; renderTable(); }
+    const select=document.getElementById('invoiceSelect');
+    select.innerHTML='<option value="">Select an invoice...</option>';
+    const invoices={};
+    allData.forEach(item=>{ if(!invoices[item.invoice_number]){ invoices[item.invoice_number]={date:item.invoice_date,supplier:item.supplier,total:item.invoice_total,itemCount:0}; } invoices[item.invoice_number].itemCount++; });
+    invoiceOrder.forEach(num=>{ const inv = invoices[num] || {date:'',supplier:'',total:0,itemCount:0}; const total=parseFloat(inv.total||0).toLocaleString('en-US',{minimumFractionDigits:2}); const opt=document.createElement('option'); opt.value=num; opt.textContent=`Invoice ${num} (${inv.itemCount} items) - ${inv.date} - ${inv.supplier} - $${total}`; select.appendChild(opt); });
+    document.getElementById('controls').style.display='block';
+    select.addEventListener('change', function(){ currentInvoice=this.value; if(currentInvoice) loadInvoiceData(); else hideDataView(); });
   }
 
-  function renderTable(){
-    if(!currentInvoice){ return; }
-    const items = allData.filter(d => d.invoice_number === currentInvoice);
-    if(!items.length){ return; }
+  function hideDataView(){
+    document.getElementById('stats').style.display='none';
+    document.getElementById('tableContainer').style.display='none';
+  }
 
-    const tbody = document.getElementById('tableBody');
-    tbody.innerHTML='';
+  function loadInvoiceData(){
+    let items = allData.filter(d=>d.invoice_number===currentInvoice);
+    if(items.length===0){ const meta={invoice_number:currentInvoice,invoice_date:'',invoice_total:'',supplier:''}; items=[{...meta,position:'',part_number:'',quantity:'',unit:'',unit_price:'',line_total:'',net_weight:'',country_of_origin:''}]; }
 
-    items.forEach((item, idx) => {
-      const row = tbody.insertRow();
-      const isSA = /[SA]$/i.test(String(item.position||''));
-      const makeCell = (val,editable=false,readonly=false) => {
-        const td = row.insertCell();
-        if(editable && !readonly){
-          const inp = document.createElement('input'); inp.type='text'; inp.value=val||'';
-          inp.addEventListener('keydown', e => {
-            if(e.key==='Enter'||e.key==='Tab'){
-              if(!e.shiftKey && inp.selectionStart===inp.value.length) focusNextInput(inp);
-              else if(e.shiftKey) focusPrevInput(inp);
-            }
-          });
-          td.appendChild(inp);
-        } else {
-          td.textContent=val||''; if(readonly) td.classList.add('readonly');
-        }
-        return td;
-      };
-      const cellPos = makeCell(item.position, false, true);
-      const cellPN = makeCell(item.part_number, true, isSA);
-      const cellQty = makeCell(item.quantity, true);
-      const cellUnit = makeCell(item.unit, true);
-      const cellPrice = makeCell(item.unit_price, true);
-      const cellTotal = makeCell(item.line_total, true);
-      const cellWeight = makeCell(item.net_weight, true);
-      const cellCountry = makeCell(item.country_of_origin, true);
-
-      cellPos.querySelector('input, td').oninput = function(){ item.position = this.value; };
-      if(!isSA) cellPN.querySelector('input, td').oninput = function(){ item.part_number = this.value; };
-      cellQty.querySelector('input, td').oninput = function(){ item.quantity = this.value; recomputeTotals(); };
-      cellUnit.querySelector('input, td').oninput = function(){ item.unit = this.value; };
-      cellPrice.querySelector('input, td').oninput = function(){ item.unit_price = this.value; recomputeTotals(); };
-      cellTotal.querySelector('input, td').oninput = function(){ item.line_total = this.value; recomputeTotals(); };
-      cellWeight.querySelector('input, td').oninput = function(){ item.net_weight = this.value; };
-      cellCountry.querySelector('input, td').oninput = function(){ item.country_of_origin = this.value; };
-
-      const actCell = row.insertCell(); actCell.classList.add('actions');
-      const dupBtn = document.createElement('button'); dupBtn.textContent='Duplicate'; dupBtn.className='btn-info'; dupBtn.onclick = () => duplicateLine(item);
-      const delBtn = document.createElement('button'); delBtn.textContent='Delete'; delBtn.className='btn-danger'; delBtn.onclick = () => deleteLine(idx);
-      actCell.appendChild(dupBtn); actCell.appendChild(delBtn);
+    items.sort((a,b)=>{
+      const A=_parsePos(a.position), B=_parsePos(b.position);
+      if(A.n!==B.n) return A.n-B.n;
+      return _rankSuffix(A.s) - _rankSuffix(B.s);
     });
 
-    recomputeTotals();
+    const meta = items[0]||{};
+    document.getElementById('statInvoice').textContent=currentInvoice;
+    document.getElementById('statDate').value=meta.invoice_date||'';
+    document.getElementById('statSupplier').value=meta.supplier||'';
+    document.getElementById('statTotal').value=meta.invoice_total||'';
+    document.getElementById('statItems').textContent=String(items.length);
+
+    const tbody=document.getElementById('tableBody');
+    tbody.innerHTML='';
+    items.forEach((row, idx)=>{ tbody.appendChild(renderRow(row, idx)); });
+
+    document.getElementById('stats').style.display='grid';
+    document.getElementById('tableContainer').style.display='block';
+
+    recomputeStats();
   }
 
-  function duplicateLine(item){
-    const items = allData.filter(d => d.invoice_number === currentInvoice);
-    const idx = items.indexOf(item);
-    if (idx < 0) return;
-    const copy = {...item};
-    allData.splice(allData.indexOf(item) + 1, 0, copy);
-    renderTable();
+  function renderRow(row, idx){
+    const tr=document.createElement('tr');
+
+    function cellInput(val, key, readonly=false){
+      const td=document.createElement('td');
+      const inp=document.createElement('input');
+      inp.value = (val==null?'':String(val));
+      if(readonly) inp.classList.add('readonly');
+      inp.readOnly = readonly;
+      inp.addEventListener('change',()=>{ updateCell(idx,key,inp.value); });
+      td.appendChild(inp); return td;
+    }
+
+    function btn(txt, cls, handler){ const b=document.createElement('button'); b.textContent=txt; b.className=cls; b.onclick=handler; return b; }
+
+    tr.appendChild(cellInput(row.position,'position'));
+    tr.appendChild(cellInput(row.part_number,'part_number'));
+    tr.appendChild(cellInput(row.quantity,'quantity'));
+    tr.appendChild(cellInput(row.unit,'unit'));
+    tr.appendChild(cellInput(row.unit_price,'unit_price'));
+    tr.appendChild(cellInput(row.line_total,'line_total'));
+
+    tr.appendChild(cellInput(row.net_weight,'net_weight'));
+    tr.appendChild(cellInput(row.country_of_origin,'country_of_origin'));
+
+    const actTd=document.createElement('td'); actTd.className='actions';
+    actTd.appendChild(btn('➕ Below','btn-info',()=>addRowBelow(idx)));
+    actTd.appendChild(btn('🗑️','btn-danger',()=>deleteRow(idx)));
+    tr.appendChild(actTd);
+
+    return tr;
   }
 
-  function deleteLine(idx){
-    const items = allData.filter(d => d.invoice_number === currentInvoice);
-    const globalIndex = allData.indexOf(items[idx]);
-    if (globalIndex < 0) return;
-    allData.splice(globalIndex, 1);
-    renderTable();
+  function updateCell(rowIndex, key, value){
+    const items = allData.filter(d=>d.invoice_number===currentInvoice);
+    const sortedIdxMap = items
+      .map((row, idx)=>({row, idx}))
+      .sort((a,b)=>{
+        const A=_parsePos(a.row.position), B=_parsePos(b.row.position);
+        if(A.n!==B.n) return A.n-B.n;
+        return _rankSuffix(A.s) - _rankSuffix(B.s);
+      })
+      .map(x=>x.idx);
+
+    const realIdx = sortedIdxMap[rowIndex];
+    const recs = allData.filter(d=>d.invoice_number===currentInvoice);
+    recs[realIdx][key]=value;
+    loadInvoiceData();
   }
 
-  function focusNextInput(current){ const all=document.querySelectorAll('#tableBody input'); const i=Array.from(all).indexOf(current); if (i>=0 && i<all.length-1) all[i+1].focus(); }
-  function focusPrevInput(current){ const all=document.querySelectorAll('#tableBody input'); const i=Array.from(all).indexOf(current); if (i>0) all[i-1].focus(); }
-
-  function recomputeTotals(){
-    const items = allData.filter(d => d.invoice_number === currentInvoice);
-    const totalSet = new Set(items.map(i=>i.invoice_total).filter(x=>x));
-    const invoiceTotal = totalSet.size===1 ? [...totalSet][0] : '';
-    const lineSum = items.reduce((acc, item) => {
-      const lt = parseFloatSafe(item.line_total);
-      return acc + (isNaN(lt) ? 0 : lt);
-    }, 0);
-    const invVal = parseFloatSafe(invoiceTotal);
-    const diff = isNaN(invVal) ? 0 : (invVal - lineSum);
-
-    document.getElementById('statInvoice').textContent = currentInvoice||'-';
-    document.getElementById('statDate').value = (items[0]?.invoice_date||'');
-    document.getElementById('statSupplier').value = (items[0]?.supplier||'');
-    document.getElementById('statItems').textContent = items.length;
-    document.getElementById('statTotal').value = invoiceTotal;
-    document.getElementById('statSum').textContent = '$' + lineSum.toFixed(2);
-    const diffEl = document.getElementById('statDiff'); diffEl.textContent = '$' + diff.toFixed(2);
-    diffEl.className = 'stat-value ' + (Math.abs(diff)<0.01?'success':'error');
+  function addRowBelow(rowIndex){
+    const items = allData.filter(d=>d.invoice_number===currentInvoice);
+    items.sort((a,b)=>{
+      const A=_parsePos(a.position), B=_parsePos(b.position);
+      if(A.n!==B.n) return A.n-B.n;
+      return _rankSuffix(A.s) - _rankSuffix(B.s);
+    });
+    const base = items[rowIndex];
+    const insertPos = `${String(base.position).replace(/[^0-9].*$/,'')}${String.fromCharCode(65 + Math.floor(Math.random()*26))}`;
+    const newRow = { invoice_number:currentInvoice, invoice_date:base.invoice_date, invoice_total:base.invoice_total, supplier:base.supplier, position:insertPos, part_number:'', quantity:'', unit:'', unit_price:'', line_total:'', net_weight:'', country_of_origin:base.country_of_origin };
+    const firstIdx = allData.findIndex(d=>d===base);
+    allData.splice(firstIdx+1,0,newRow);
+    loadInvoiceData();
   }
 
-  function updateInvoiceTotal(val){
-    allData.forEach(d => { if(d.invoice_number===currentInvoice) d.invoice_total=val; });
-    renderTable();
-  }
-
-  function updateInvoiceField(field, val){
-    allData.forEach(d => { if(d.invoice_number===currentInvoice) d[field]=val; });
-    renderTable();
+  function deleteRow(rowIndex){
+    const items = allData.filter(d=>d.invoice_number===currentInvoice);
+    items.sort((a,b)=>{
+      const A=_parsePos(a.position), B=_parsePos(b.position);
+      if(A.n!==B.n) return A.n-B.n;
+      return _rankSuffix(A.s) - _rankSuffix(B.s);
+    });
+    const base = items[rowIndex];
+    const idx = allData.findIndex(d=> d===base);
+    if(idx>=0){ allData.splice(idx,1); loadInvoiceData(); }
   }
 
   function addBlankRowForCurrent(){
     if(!currentInvoice){ showAlert('Select an invoice first','error'); return; }
-    const items = allData.filter(d => d.invoice_number === currentInvoice);
-    const lastPos = items.length>0 ? (parseInt(items[items.length-1].position)||0) : 0;
-    const newRow = {
-      invoice_number: currentInvoice,
-      invoice_date: items[0]?.invoice_date || '',
-      invoice_total: items[0]?.invoice_total || '',
-      supplier: items[0]?.supplier || '',
-      position: String(lastPos+1),
-      part_number: '',
-      quantity: '',
-      unit: 'KG',
-      unit_price: '',
-      line_total: '',
-      net_weight: '',
-      country_of_origin: ''
-    };
-    allData.push(newRow);
-    renderTable();
+    const items = allData.filter(d=>d.invoice_number===currentInvoice);
+    const meta = items[0]||{};
+    const newRow = { invoice_number:currentInvoice, invoice_date:meta.invoice_date||'', invoice_total:meta.invoice_total||'', supplier:meta.supplier||'', position:'', part_number:'', quantity:'', unit:'', unit_price:'', line_total:'', net_weight:'', country_of_origin:meta.country_of_origin||'' };
+    allData.push(newRow); loadInvoiceData();
   }
+
+  function updateInvoiceField(field, value){
+    allData.forEach(d=>{ if(d.invoice_number===currentInvoice){ d[field]=value; }});
+  }
+  function updateInvoiceTotal(value){ updateInvoiceField('invoice_total', value); recomputeStats(); }
+
+  function recomputeStats(){
+    const items = allData.filter(d=>d.invoice_number===currentInvoice);
+    const sum = items.reduce((acc,r)=> acc + (parseFloatSafe(r.line_total)||0), 0);
+    const invTotal = parseFloatSafe(items[0]?.invoice_total);
+    const diff = (isNaN(invTotal)?0:invTotal) - sum;
+    document.getElementById('statSum').textContent = '$'+sum.toFixed(2);
+    document.getElementById('statDiff').textContent = '$'+diff.toFixed(2);
+  }
+
+  function resetUpload(){ location.reload(); }
 
   function exportToExcel(){
     if(!allData.length){ showAlert('No data to export','error'); return; }
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(allData);
-    XLSX.utils.book_append_sheet(wb, ws, 'All Data');
+    const byInv = {};
+    allData.forEach(r=>{ if(!byInv[r.invoice_number]) byInv[r.invoice_number]=[]; byInv[r.invoice_number].push(r); });
+    Object.keys(byInv).forEach(inv=>{
+      const rows = byInv[inv].slice().sort((a,b)=>{
+        const A=_parsePos(a.position), B=_parsePos(b.position);
+        if(A.n!==B.n) return A.n-B.n;
+        return _rankSuffix(A.s) - _rankSuffix(B.s);
+      });
+      const header = [
+        ['Invoice', inv],
+        ['Date', rows[0]?.invoice_date || ''],
+        ['Supplier', rows[0]?.supplier || ''],
+        ['Invoice Total', rows[0]?.invoice_total || ''],
+        [],
+        ['Pos','Part Number','Quantity','Unit','Unit Price','Line Total','Net Weight','Country']
+      ];
+      const body = rows.map(r=>[
+        r.position||'', r.part_number||'', r.quantity||'', r.unit||'', r.unit_price||'', r.line_total||'', r.net_weight||'', r.country_of_origin||''
+      ]);
+      const ws = XLSX.utils.aoa_to_sheet([...header, ...body]);
+      XLSX.utils.book_append_sheet(wb, ws, `INV_${String(inv).slice(-10)}`);
+    });
     const out = XLSX.write(wb, {type:'array', bookType:'xlsx'});
     const blob = new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = (uploadedPdfName?uploadedPdfName+'_':'')+'parsed_invoices.xlsx';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showAlert('All data exported successfully!', 'success');
-  }
-
-  function resetUpload(){
-    allData=[]; invoiceOrder=[]; currentInvoice=''; uploadedPdfName='';
-    document.getElementById('controls').style.display='none';
-    document.getElementById('stats').style.display='none';
-    document.getElementById('tableContainer').style.display='none';
-    document.getElementById('uploadSection').style.display='block';
-    document.getElementById('tableBody').innerHTML='';
+    a.href = url; a.download = (uploadedPdfName?uploadedPdfName+'_':'')+'parsed_invoices.xlsx';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   }
 
   // ========================================
-  // DATABASE + TARIFF LOOKUP
+  // GITHUB DATABASE AUTO-LOAD & DESCARTES EXPORT
   // ========================================
   
   let mankiDb = null;
   let htsCodesDb = null;
   let steelAlumDb = null;
-  let midDb = null;  // NEW: MID database
+
+  // NEW: Supplier MID sheet + index
+  let supplierMidDb = null;
+  let supplierMidIndex = [];
 
   const GITHUB_CONFIG = {
     owner: 'iffinc-ga',
@@ -550,17 +667,18 @@
       if(workbook.SheetNames.includes('Sheet1')){
         steelAlumDb = XLSX.utils.sheet_to_json(workbook.Sheets['Sheet1']);
       } else throw new Error('Sheet1 not found');
-      
-      // NEW: Load MID tab
+
+      // NEW: load MID sheet (sheet name: "MID")
       if(workbook.SheetNames.includes('MID')){
-        midDb = XLSX.utils.sheet_to_json(workbook.Sheets['MID']);
-        console.log('MID database loaded:', midDb);
+        supplierMidDb = XLSX.utils.sheet_to_json(workbook.Sheets['MID']);
+        buildSupplierMidIndex();
       } else {
-        console.warn('MID sheet not found in database');
-        midDb = [];
+        supplierMidDb = [];
+        supplierMidIndex = [];
       }
       
-      document.getElementById('dbStatus').textContent = `Database loaded ✓ (${mankiDb.length} parts, ${htsCodesDb.length} HTS, ${steelAlumDb.length} mappings, ${midDb.length} MIDs)`;
+      const midsCount = supplierMidIndex.length;
+      document.getElementById('dbStatus').textContent = `Database loaded ✓ (${mankiDb.length} parts, ${htsCodesDb.length} HTS, ${steelAlumDb.length} mappings, ${midsCount} MIDs)`;
       document.getElementById('dbStatus').className = 'db-status db-loaded';
       document.getElementById('dbInfo').textContent = `Loaded: ${new Date().toLocaleString()} | Source: GitHub Repository`;
       console.log('Database loaded successfully');
@@ -572,46 +690,13 @@
     }
   }
 
-  // NEW: Function to find supplier MID based on partial name match
-  function findSupplierMID(supplierName) {
-    if (!midDb || !midDb.length || !supplierName) return '';
-    
-    const searchName = String(supplierName).toLowerCase().trim();
-    
-    // Try to find a match by checking if any part of the MANUFACTURERNAME contains the supplier name
-    // or if the supplier name contains any significant part of the MANUFACTURERNAME
-    for (const row of midDb) {
-      const manufacturerName = String(row.MANUFACTURERNAME || '').toLowerCase().trim();
-      const manufacturerMID = String(row.MANUFACTURERMID || '').trim();
-      
-      if (!manufacturerName || !manufacturerMID) continue;
-      
-      // Split both names into words and check for significant word matches
-      const searchWords = searchName.split(/[\s\-.,&]+/).filter(w => w.length > 2);
-      const mfgWords = manufacturerName.split(/[\s\-.,&]+/).filter(w => w.length > 2);
-      
-      // Check if any significant word from search matches any word in manufacturer name
-      for (const searchWord of searchWords) {
-        for (const mfgWord of mfgWords) {
-          if (mfgWord.includes(searchWord) || searchWord.includes(mfgWord)) {
-            console.log(`MID Match found: "${supplierName}" -> "${row.MANUFACTURERNAME}" -> ${manufacturerMID}`);
-            return manufacturerMID;
-          }
-        }
-      }
-    }
-    
-    console.log(`No MID match found for supplier: "${supplierName}"`);
-    return '';
-  }
-
   // === Base 4–5 char part number extractor for main lines ===
   function extractBasePartNumber(fullPartNum){
     const s = String(fullPartNum || '').trim();
-    const head = s.split('.')[0];                  // text before first dot
+    const head = s.split('.')[0];
     const alnum = (head.match(/[A-Za-z0-9]+/)||[''])[0];
     if (alnum.length >= 5) return alnum.slice(0,5);
-    if (alnum.length === 4) return alnum;          // allow 4-char base
+    if (alnum.length === 4) return alnum;
     const fallback = (s.match(/[A-Za-z0-9]{4,5}/)||[''])[0];
     return fallback || alnum || '';
   }
@@ -620,54 +705,133 @@
     if(!mankiDb) return [];
     const part = mankiDb.find(row => String(row['PRIMARY PART NUM']) === basePartNum);
     if(!part) return [];
-    const codes = [];
-    for(let i=1;i<=5;i++){
-      const code = part[`HTS ${i}`];
-      if(code){ codes.push(String(code)); }
+    const tariffs = [];
+    for(let i=0; i<=5; i++){
+      const col = i===0 ? 'TARIFF NUM' : `TARIFF NUM_${i}`;
+      if(part[col]){
+        const tariffStr = String(part[col]).replace(/\.0$/, '');
+        tariffs.push(tariffStr);
+      }
     }
-    return codes;
+    return tariffs;
   }
 
-  function lookupHtsUom(tariffCode){
-    if(!htsCodesDb) return {uom1:'', uom2:''};
-    const htsRow = htsCodesDb.find(row => String(row['HTS Code']).startsWith(String(tariffCode)));
-    if(!htsRow) return {uom1:'', uom2:''};
-    return {
-      uom1: htsRow['UoM 1']||'',
-      uom2: htsRow['UoM 2']||''
+  function lookupHtsUom(htsCode){
+    if(!htsCodesDb) return {uom1: '', uom2: ''};
+    const hts = htsCodesDb.find(row => String(row['HTS Code']) === String(htsCode));
+    if(!hts) return {uom1: '', uom2: ''};
+    return { uom1: hts['UOM1'] || '', uom2: hts['UOM2'] || '' };
+  }
+
+  function getSteelAlumPartNumber(tariff, type){
+    if(!steelAlumDb) return type === 'Steel' ? 'STEEL GENERIC' : 'ALUM GENERIC';
+    const mapping = steelAlumDb.find(row => String(row['Tariff']).replace(/\.0$/, '') === String(tariff));
+    if(mapping) return type === 'Steel' ? mapping['Steel'] : mapping['Aluminum'];
+    return type === 'Steel' ? 'STEEL GENERIC' : 'ALUM GENERIC';
+  }
+
+  // ==============================
+  // NEW: SupplierMID fuzzy lookup
+  // ==============================
+  function buildSupplierMidIndex(){
+    supplierMidIndex = [];
+    if(!Array.isArray(supplierMidDb)) return;
+
+    // detect columns (be tolerant to headers)
+    const sample = supplierMidDb[0] || {};
+    const keys = Object.keys(sample);
+
+    const supplierKey = keys.find(k => /supplier.*name|supplier/i.test(k)) || 'Supplier';
+    const midKey = keys.find(k => /\bmid\b|supplier\s*mid|seller\s*mid/i.test(k)) || 'MID';
+
+    supplierMidDb.forEach(row=>{
+      const name = String(row[supplierKey] ?? row['Supplier'] ?? '').trim();
+      const mid  = String(row[midKey] ?? row['MID'] ?? '').trim();
+      if(name && mid){
+        supplierMidIndex.push({ name, norm: normalizeSupplierName(name), mid });
+      }
+    });
+  }
+
+  function normalizeSupplierName(s){
+    return String(s||'')
+      .toLowerCase()
+      .replace(/&/g,' and ')
+      .replace(/\b(gmbh|co\.?|kg|llc|inc\.?|ltd\.?|company|coatings|industrie|lackfabrik|the)\b/gi,'')
+      .replace(/[^a-z0-9]+/g,'')
+      .trim();
+  }
+
+  function diceCoefficient(a,b){
+    if(!a || !b) return 0;
+    if(a === b) return 1;
+    const bigrams = str => {
+      const arr = [];
+      for(let i=0;i<a.length-1;i++){ arr.push(a.slice(i,i+2)); }
+      return arr;
     };
+    const A = bigrams(a);
+    const B = bigrams(b);
+    if(A.length === 0 || B.length === 0) return 0;
+    let intersection = 0;
+    const counts = {};
+    A.forEach(bg => counts[bg] = (counts[bg]||0)+1);
+    B.forEach(bg => { if(counts[bg]){ intersection++; counts[bg]--; } });
+    return (2*intersection) / (A.length + B.length);
   }
 
-  function getSteelAlumPartNumber(htsCode, materialType){
-    if(!steelAlumDb) return materialType==='Steel'?'STEEL GENERIC':'ALUM GENERIC';
-    const rec = steelAlumDb.find(r =>
-      String(r['HTS Code']||'').trim() === String(htsCode||'').trim() &&
-      String(r['Material Type']||'').toLowerCase() === materialType.toLowerCase()
-    );
-    return rec ? (rec['Part Number']||'STEEL GENERIC') : (materialType==='Steel'?'STEEL GENERIC':'ALUM GENERIC');
+  function lookupSupplierMID(supplierName){
+    if(!supplierName) return '';
+    if(!supplierMidIndex.length) return '';
+    const q = normalizeSupplierName(supplierName);
+    if(!q) return '';
+
+    let best = { score: 0, mid: '' };
+
+    for(const rec of supplierMidIndex){
+      // quick exact/contains boosts
+      const exact = q === rec.norm ? 1 : 0;
+      const contains = rec.norm.includes(q) || q.includes(rec.norm) ? 0.85 : 0;
+      const dice = diceCoefficient(q, rec.norm);
+      const score = Math.max(exact, contains, dice);
+      if(score > best.score){
+        best = { score, mid: rec.mid };
+      }
+    }
+
+    // pick if confident enough; 0.35 works well for short names like "finalin"
+    return best.score >= 0.35 ? best.mid : '';
   }
 
-  // ========================================
-  // EXPORT TO DESCARTES TEMPLATE
-  // ========================================
+  // === Export ALL invoices to Descartes template (global sort, S before A) ===
   function exportToDescartes(){
-    if(!mankiDb){ showAlert('Database not loaded yet. Please wait for it to load from GitHub.','error'); return; }
+    if(!mankiDb || !htsCodesDb || !steelAlumDb){
+      showAlert('Database not loaded yet. Please wait for it to load from GitHub.','error');
+      return;
+    }
     if(!allData.length){ showAlert('No data to export','error'); return; }
 
-    const roundWeight = (val) => {
-      const num = parseFloatSafe(val);
-      if(isNaN(num)) return '';
-      return num.toFixed(2);
-    };
+    const items = allData.slice().sort((a,b)=>{
+      const ai = String(a.invoice_number||''); const bi = String(b.invoice_number||'');
+      if (ai !== bi) return ai.localeCompare(bi);
+      const A=_parsePos(a.position), B=_parsePos(b.position);
+      if(A.n!==B.n) return A.n-B.n;
+      return _rankSuffix(A.s) - _rankSuffix(B.s);
+    });
 
     const exportRows = [];
-    const items = allData;
 
-    items.forEach((item, index) => {
+    const roundWeight = (val) => {
+      const num = parseFloat(val);
+      if (isNaN(num)) return '';
+      if (num < 1) return 1;
+      return Math.round(num);
+    };
+
+    items.forEach(item => {
       const isSteelLine = String(item.position||'').endsWith('S') || item.part_number === 'STEEL';
       const isAlumLine  = String(item.position||'').endsWith('A') || item.part_number === 'ALUMINUM';
 
-      // === Buyer/Supplier part number logic ===
       let buyerPartNum, supplierPartNum;
       if (!isSteelLine && !isAlumLine) {
         const basePart = extractBasePartNumber(item.part_number);
@@ -689,15 +853,14 @@
         supplierPartNum = subNum;
       }
 
-      // NEW: Find SupplierMID using partial match
-      const supplierMID = findSupplierMID(item.supplier);
-
-      // Build Descartes row
       const row = {
         'InvoiceNumber': item.invoice_number,
         'InvoiceDate': item.invoice_date,
         'InvoiceTotal': item.invoice_total,
-        'SupplierMID': supplierMID,  // NEW: Populated with matched MID
+
+        // NEW: SupplierMID via fuzzy lookup using current (possibly edited) supplier name
+        'SupplierMID': '',
+
         'SupplierName': item.supplier,
         'BuyerPartNumber': buyerPartNum,
         'SupplierPartNumber': supplierPartNum,
@@ -783,7 +946,9 @@
         '5 Value': ''
       };
 
-      // For S/A sublines: mirror displayed Quantity into NetWeight as requested
+      // === NEW: set SupplierMID (only change requested)
+      row['SupplierMID'] = lookupSupplierMID(item.supplier);
+
       if (isSteelLine || isAlumLine) {
         row['NetWeight'] = roundWeight(item.quantity);
       }
@@ -823,7 +988,6 @@
         }
       });
 
-      // For steel lines: add specific tariff and quantity data
       if (isSteelLine) {
         row['TariffNumber'] = '99030133';
         row['SecondaryTariffNumber'] = '99038191';
@@ -831,7 +995,6 @@
         row['Secondaryunitofmeasure1'] = 'KG';
       }
 
-      // For aluminum lines: add specific tariff and quantity data
       if (isAlumLine) {
         row['TariffNumber'] = '99030133';
         row['SecondaryTariffNumber'] = '99038508';
@@ -861,7 +1024,7 @@
   }
 </script>
 
-<!-- ==== Runtime "no-UI-change" patch: normalize only when needed ==== -->
+<!-- ==== Runtime “no-UI-change” patch: normalize only when needed ==== -->
 <script>
 (function(){
   function normalizeWeirdSpacing(s){
