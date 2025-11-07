@@ -884,6 +884,14 @@
         row['NetWeight'] = item.quantity;
       }
 
+      // For steel lines: add specific tariff and quantity data
+      if (isSteelLine) {
+        row['TariffNumber'] = '99030133';
+        row['SecondaryTariffNumber'] = '99038191';
+        row['Secondary Quantity1'] = item.quantity;
+        row['Secondaryunitofmeasure1'] = 'KG';
+      }
+
       const basePartNum = extractBasePartNumber(item.part_number);
       const tariffs = lookupTariffs(basePartNum);
 
