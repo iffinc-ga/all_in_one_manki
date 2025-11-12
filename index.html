@@ -76,9 +76,6 @@
     .table-body td{padding:6px 6px}
     .table-body td input{width:100%;}
   </style>
-<style>
-.undo-btn{background:#ffbf00;color:#000;font-weight:bold;font-size:1.1em;padding:6px 14px;border-radius:8px;border:2px solid #444;box-shadow:2px 2px 4px rgba(0,0,0,0.3);} .undo-btn:hover{background:#ffd633;}
-</style>
 </head>
 <body>
 <div class="container">
@@ -112,9 +109,8 @@
 
   <div class="controls" id="controls">
     <select id="invoiceSelect"><option value="">Select an invoice...</option></select>
-    <button class="btn-light undo-btn" onclick="undoLast()" title="Undo last action" class="undo-btn">↩️ Undo</button>
-    <button class="btn-warning" onclick="exportToDescartes()">📋 Export to Descartes Template (All Invoices)</button>
-    <button class="btn-success" onclick="exportToExcel()">📥 Export All to Excel</button>
+    <button class="btn-warning" onclick="undoLast()" title="Undo last action">↩️ Undo</button>
+    <button class="btn-success" onclick="exportToDescartes()">📋 Export to Descartes Template (All Invoices)</button>
     <button class="btn-primary" onclick="resetUpload()">📤 New Upload</button>
     <span class="inline-help">Tip: Use Tab/Shift+Tab or Enter to move between fields. Edit <strong>Supplier</strong> before export.</span>
   </div>
@@ -747,7 +743,9 @@ const items = allData.filter(d=>d.invoice_number===currentInvoice);
     loadInvoiceData();
   }
 
-  
+  function addBlankRowForCurrent(){
+      pushUndo();
+if(!currentInvoice){ showAlert('Select an invoice first','error'); return; }
     const items = allData.filter(d=>d.invoice_number===currentInvoice);
     const meta = items[0]||{};
     const newPos = '';
@@ -917,10 +915,7 @@ allData.forEach(d=>{ if(d.invoice_number===currentInvoice){ d[field]=value; }});
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   }
 
-  
-// No-op stub after removing the UI button
-function addBlankRowForCurrent(){ /* no-op */ }
-function exportToDescartes(){
+  function exportToDescartes(){
     if(!mankiDb || !htsCodesDb || !steelAlumDb){
       showAlert('Database not loaded yet. Please wait or click Work Offline.','error');
       return;
