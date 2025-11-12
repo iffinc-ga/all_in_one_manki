@@ -109,10 +109,9 @@
 
   <div class="controls" id="controls">
     <select id="invoiceSelect"><option value="">Select an invoice...</option></select>
-    <button class="btn-light" onclick="undoLast()" title="Undo last action">↩️ Undo</button>
+    <button class="btn-light" onclick="undoLast()" title="Undo last action" class="undo-btn"><style>.undo-btn{background:#ffbf00;color:#000;font-weight:bold;font-size:1.1em;padding:6px 14px;border-radius:8px;border:2px solid #444;box-shadow:2px 2px 4px rgba(0,0,0,0.3);} .undo-btn:hover{background:#ffd633;}</style>↩️ Undo</button>
     <button class="btn-warning" onclick="exportToDescartes()">📋 Export to Descartes Template (All Invoices)</button>
     <button class="btn-success" onclick="exportToExcel()">📥 Export All to Excel</button>
-    <button class="btn-info" onclick="addBlankRowForCurrent()">➕ Add Blank Row</button>
     <button class="btn-primary" onclick="resetUpload()">📤 New Upload</button>
     <span class="inline-help">Tip: Use Tab/Shift+Tab or Enter to move between fields. Edit <strong>Supplier</strong> before export.</span>
   </div>
@@ -745,9 +744,7 @@ const items = allData.filter(d=>d.invoice_number===currentInvoice);
     loadInvoiceData();
   }
 
-  function addBlankRowForCurrent(){
-      pushUndo();
-if(!currentInvoice){ showAlert('Select an invoice first','error'); return; }
+  
     const items = allData.filter(d=>d.invoice_number===currentInvoice);
     const meta = items[0]||{};
     const newPos = '';
