@@ -29,6 +29,7 @@
     .btn-info{background:#17a2b8;color:#fff}.btn-info:hover{background:#138496}
     .btn-warning{background:#ffc107;color:#212529}.btn-warning:hover{background:#e0a800}
     .btn-light{background:#f8f9fa;color:#212529;border:1px solid #ced4da}
+    .btn-secondary{background:#6c757d;color:#fff}.btn-secondary:hover{background:#5a6268}
     .stats{padding:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:15px;background:#fff3cd;display:none}
     .stat{padding:15px;background:#fff;border-radius:4px;border-left:4px solid #ffc107}
     .stat-label{font-size:11px;color:#6c757d;text-transform:uppercase;margin-bottom:5px}
@@ -112,6 +113,7 @@
     <button class="btn-warning" onclick="exportToDescartes()">📋 Export to Descartes Template (All Invoices)</button>
     <button class="btn-success" onclick="exportToExcel()">📥 Export All to Excel</button>
     <button class="btn-info" onclick="addBlankRowForCurrent()">➕ Add Blank Row</button>
+    <button class="btn-secondary" onclick="undoLast()" id="undoBtn" disabled>↶ Undo Last</button>
     <button class="btn-primary" onclick="resetUpload()">📤 New Upload</button>
     <span class="inline-help">Tip: Use Tab/Shift+Tab or Enter to move between fields. Edit <strong>Supplier</strong> before export.</span>
   </div>
@@ -165,6 +167,54 @@
   let steelAlumDb = null;
   let supplierMidDb = null;
   let supplierMidIndex = [];
+
+  // UNDO SYSTEM
+  let undoStack = [];
+  const MAX_UNDO_STACK = 50;
+
+  function saveStateToUndo(action) {
+    const state = {
+      action: action,
+      data: JSON.parse(JSON.stringify(allData)),
+      currentInvoice: currentInvoice,
+      timestamp: Date.now()
+    };
+    undoStack.push(state);
+    if (undoStack.length > MAX_UNDO_STACK) {
+      undoStack.shift();
+    }
+    updateUndoButton();
+  }
+
+  function updateUndoButton() {
+    const btn = document.getElementById('undoBtn');
+    if (undoStack.length > 0) {
+      btn.disabled = false;
+      const lastAction = undoStack[undoStack.length - 1].action;
+      btn.title = `Undo: ${lastAction}`;
+    } else {
+      btn.disabled = true;
+      btn.title = 'Nothing to undo';
+    }
+  }
+
+  function undoLast() {
+    if (undoStack.length === 0) {
+      showAlert('Nothing to undo', 'error');
+      return;
+    }
+    
+    const lastState = undoStack.pop();
+    allData = JSON.parse(JSON.stringify(lastState.data));
+    currentInvoice = lastState.currentInvoice;
+    
+    if (currentInvoice) {
+      loadInvoiceData();
+    }
+    
+    updateUndoButton();
+    showAlert(`Undid: ${lastState.action}`, 'success');
+  }
 
   // focus hint + suppression to avoid double re-render stealing focus
   let focusHint = null;
@@ -220,7 +270,7 @@
       }
 
       if(!fullText.trim()){
-        showAlert('⚠️ The PDF had no extractable text (it may be scanned). Try an OCR’d copy.','error');
+        showAlert('⚠️ The PDF had no extractable text (it may be scanned). Try an OCR'd copy.','error');
         document.getElementById('uploadSection').style.display='block';
         return;
       }
@@ -231,6 +281,9 @@
         const invoiceCount = new Set(allData.map(d=>d.invoice_number)).size;
         showAlert(`✅ Found ${invoiceCount} invoice(s) with ${allData.length} line items`,'success');
         setupInterface();
+        // Clear undo stack on new upload
+        undoStack = [];
+        updateUndoButton();
       }else{
         showAlert('⚠️ No invoice data found in PDF.','error');
         document.getElementById('uploadSection').style.display='block';
@@ -280,7 +333,7 @@
       const UNIT_WORD = '(?:carton|bucket(?:s|\\(s\\))?|pail|tin|can|barrel|canister|cartridge|bottle(?:s|\\(s\\))?|piece(?:\\(s\\))?|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|Kilogramme)';
 
       const linePatternA = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
+        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+` + UNIT_WORD + String.raw`\s*(?:\([^)]*\)\s*)?` +
         String.raw`x\s*([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
         String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
         String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
@@ -289,7 +342,7 @@
       );
 
       const linePatternB = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +
+        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+` + UNIT_WORD + String.raw`\s*` +
         String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
         String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
         String.raw`([\d,]+)\.?\d*`,
@@ -347,66 +400,181 @@
         pushItem({
           position,
           partNumber:(mB[2]||'').slice(0,64),
-          containerQty:(mB[3]||'').replace(/,/g,''),
-          perUnitQty:'', perUnitType:'',
-          totalQty:(mB[4]||'').replace(/,/g,''),
-          totalUnit:mB[5]||'',
-          unitPrice:(mB[6]||''),
-          priceUnit:mB[7]||'',
-          lineTotal:(mB[8]||'').replace(/,/g,''),
+          containerQty:null,
+          perUnitQty:null,
+          perUnitType:null,
+          totalQty:(mB[3]||'').replace(/,/g,''),
+          totalUnit:mB[4]||'',
+          unitPrice:mB[5]||'',
+          priceUnit:mB[6]||'',
+          lineTotal:(mB[7]||'').replace(/,/g,''),
           matchIndex:mB.index ?? 0
         });
       }
 
-      const enriched=[];
-      for(let idx=0; idx<lineItems.length; idx++){
-        const item=lineItems[idx];
-        const startPos=item._matchIndex ?? 0;
-        const endPos = idx < lineItems.length-1 ? (lineItems[idx+1]._matchIndex ?? (startPos+2000)) : (startPos+3000);
-        const itemSection = sectionText.substring(startPos, Math.min(endPos, sectionText.length));
+      lineItems.sort((a,b)=>(a._matchIndex||0)-(b._matchIndex||0));
 
-        const weightMatch=itemSection.match(/([\d,.]+)\s+L\s+([\d,.]+)\s+L/);
-        if(weightMatch){ item.net_weight=(weightMatch[2]||'').replace(/,/g,''); }
+      const idxMap = lineItems.reduce((acc,it,i)=>{ acc[it.position]=i; return acc; }, {});
 
-        const cooMatch=itemSection.match(/Country\s+of\s+origin:\s*([^\n]+?)(?:\s|$)/i);
-        if(cooMatch){ let country=(cooMatch[1]||'').trim();
-          const lc=country.toLowerCase(); if(lc.includes('germany')) country='DE'; else if(lc.includes('japan')) country='JP'; else if(lc.includes('netherlands')) country='NL'; else if(lc.includes('united')&&lc.includes('kingdom')) country='GB';
-          item.country_of_origin=country; }
+      const weightPattern = new RegExp(
+        String.raw`Total\s+net\s+weight\s+per\s+PC\s*:\s*([\d,]+\.?\d*)\s*KG`,
+        'ig'
+      );
+      const originPattern = /Country\s+of\s+origin\s*:\s*([A-Z]{2}|[A-Z]{3})/gi;
+      const steelQtyPattern = new RegExp(
+        String.raw`Quantity\s+per\s+PC\s*:\s*([\d,]+\.?\d*)\s*KG`,
+        'gi'
+      );
+      const steelKgPattern = new RegExp(
+        String.raw`Total\s+net\s+steel\s+weight\s+per\s+KG\s*:\s*([\d,]+\.?\d*)`,
+        'gi'
+      );
+      const steelPricePattern = new RegExp(
+        String.raw`([\d,]+\.?\d*)\s*USD\s*\/\s*KG`,
+        'gi'
+      );
+      const steelTotalPattern = new RegExp(
+        String.raw`Total\s+customs\s+value\s*:\s*([\d,]+\.?\d*)\s*USD`,
+        'gi'
+      );
+      const aluminumQtyPattern = new RegExp(
+        String.raw`Quantity\s+per\s+PC\s*:\s*([\d,]+\.?\d*)\s*KG`,
+        'gi'
+      );
+      const aluminumKgPattern = new RegExp(
+        String.raw`Total\s+net\s+aluminum\s+weight\s+per\s+KG\s*:\s*([\d,]+\.?\d*)`,
+        'gi'
+      );
+      const aluminumPricePattern = new RegExp(
+        String.raw`([\d,]+\.?\d*)\s*USD\s*\/\s*KG`,
+        'gi'
+      );
+      const aluminumTotalPattern = new RegExp(
+        String.raw`Total\s+customs\s+value\s*:\s*([\d,]+\.?\d*)\s*USD`,
+        'gi'
+      );
 
-        const steelBlockMatch = itemSection.match(/9903\.81\.91\s*-\s*Steel\s*Packaging([\s\S]*?)(?:9903\.85\.08|Total\s+invoice\s+value|Country\s+of\s+origin|Net\s+product\s+value|$)/i);
-        let steelWeightKG = NaN, steelCustomsUSD = NaN;
-        if(steelBlockMatch){
-          const steelBlock = steelBlockMatch[1];
-          const w1 = steelBlock.match(/Total\s+net\s+steel\s+weight\s+per\s+KG:\s*([\d,.]+)/i);
-          if(w1) steelWeightKG = parseFloatSafe(w1[1]);
-          if(isNaN(steelWeightKG)){
-            const cpcs = steelBlock.match(/Steel\s+content\s+per\s+PCS:\s*([\d,.]+)\s*KG/i);
-            const qpcs = steelBlock.match(/Quantity\s+per\s*PCS:\s*([\d,.]+)/i);
-            if(cpcs && qpcs){ steelWeightKG = parseFloatSafe(cpcs[1]) * parseFloatSafe(qpcs[1]); }
-          }
-          const cval = steelBlock.match(/Total\s+customs\s+value:\s*([\d,.]+)\s*USD/i);
-          if(cval) steelCustomsUSD = parseFloatSafe(cval[1]);
+      function clean(s){ return String(s||'').replace(/[\r\n]+/g,'').replace(/\s{2,}/g,' ').trim(); }
+      function flNorm(s){ const c=String(s||'').replace(/,/g,''); const v=parseFloat(c); return isNaN(v)?NaN:v; }
+
+      const weightPieces = [];
+      {
+        let m; while((m=weightPattern.exec(sectionText))!==null){
+          weightPieces.push({ idx: m.index, weight: m[1] });
         }
-
-        const alumBlockMatch = itemSection.match(/9903\.85\.08\s*-\s*Aluminum\s*Content[\s\S]*?(?:Total\s+invoice\s+value|Country\s+of\s+origin|Net\s+product\s+value|$)/i);
-        let alumQty = NaN, alumCustomsUSD = NaN, alumUnit='KG';
-        if(alumBlockMatch){
-          const alumBlock = alumBlockMatch[0];
-          const aq = alumBlock.match(/Total\s+aluminum\s+content:\s*([\d,.]+)/i);
-          if(aq) alumQty = parseFloatSafe(aq[1]);
-          const cvalA = alumBlock.match(/Total\s+customs\s+value:\s*([\d,.]+)\s*USD/i);
-          if(cvalA) alumCustomsUSD = parseFloatSafe(cvalA[1]);
+      }
+      const originPieces = [];
+      {
+        let m; while((m=originPattern.exec(sectionText))!==null){
+          originPieces.push({ idx: m.index, code: m[1] });
         }
+      }
 
-        let mainLineTotal = parseFloatSafe(item.line_total);
-        const steelAdd = isNaN(steelCustomsUSD)?0:steelCustomsUSD;
-        const alumAdd  = isNaN(alumCustomsUSD)?0:alumCustomsUSD;
-        if(!isNaN(mainLineTotal) && (steelAdd>0 || alumAdd>0)){
-          mainLineTotal = Math.max(0, mainLineTotal - steelAdd - alumAdd);
-          item.line_total = fmt2(mainLineTotal);
-        }
+      for(let i=0; i<lineItems.length; i++){
+        const item = lineItems[i];
+        const after = (item._matchIndex || 0);
+        const before = (i+1 < lineItems.length) ? (lineItems[i+1]._matchIndex || 999999) : 999999;
+        const wpArr = weightPieces.filter(x => x.idx > after && x.idx < before);
+        const orArr = originPieces.filter(x => x.idx > after && x.idx < before);
+        if(wpArr[0]) item.net_weight = wpArr[0].weight;
+        if(orArr[0]) item.country_of_origin = orArr[0].code;
+      }
 
+      const enriched = [];
+      for(const item of lineItems){
         enriched.push(item);
+        const after = item._matchIndex;
+        const posList = lineItems.map(x=>x.position);
+        const myIdx = posList.indexOf(item.position);
+        const before = (myIdx+1 < posList.length) ? (lineItems[myIdx+1]._matchIndex || 999999) : 999999;
+        const slice = sectionText.substring(after, before);
+
+        let steelQty=NaN, steelTotalKg=NaN, steelPrice=NaN, steelTotal=NaN, steelCustomsUSD=NaN, steelAdd=false, alumQty=NaN, alumTotalKg=NaN, alumPrice=NaN, alumTotal=NaN, alumCustomsUSD=NaN, alumAdd=false;
+
+        if(slice.includes('9903.81.91')){
+          let mQ; while((mQ=steelQtyPattern.exec(slice))!==null){
+            const raw = mQ[1].replace(/,/g,'');
+            const val = parseFloat(raw);
+            if(!isNaN(val)) steelQty = val;
+          }
+          let mK; while((mK=steelKgPattern.exec(slice))!==null){
+            const raw = mK[1].replace(/,/g,'');
+            const val = parseFloat(raw);
+            if(!isNaN(val)) steelTotalKg = val;
+          }
+          let mP; while((mP=steelPricePattern.exec(slice))!==null){
+            const raw = mP[1].replace(/,/g,'');
+            const val = parseFloat(raw);
+            if(!isNaN(val)) steelPrice = val;
+          }
+          let mT; while((mT=steelTotalPattern.exec(slice))!==null){
+            const raw = mT[1].replace(/,/g,'');
+            const val = parseFloat(raw);
+            if(!isNaN(val)) steelTotal = val;
+          }
+          if(!isNaN(steelTotalKg) && !isNaN(steelPrice)){
+            steelCustomsUSD = steelTotalKg * steelPrice;
+          } else if(!isNaN(steelTotal)){
+            steelCustomsUSD = steelTotal;
+          }
+          const parentQty = flNorm(item.quantity);
+          if(!isNaN(steelCustomsUSD) && !isNaN(parentQty)){
+            if(steelCustomsUSD>0 && parentQty>0){
+              const parentTotal = flNorm(item.line_total);
+              if(!isNaN(parentTotal) && parentTotal>=steelCustomsUSD){
+                const parentAdjusted = parentTotal - steelCustomsUSD;
+                item.line_total = fmt2(Math.max(0,parentAdjusted));
+                steelAdd=true;
+              }else if(steelCustomsUSD>0){
+                steelAdd=true;
+              }
+            }
+          }
+        }
+
+        if(slice.includes('9903.85.08')){
+          let mQ; while((mQ=aluminumQtyPattern.exec(slice))!==null){
+            const raw = mQ[1].replace(/,/g,'');
+            const val = parseFloat(raw);
+            if(!isNaN(val)) alumQty = val;
+          }
+          let mK; while((mK=aluminumKgPattern.exec(slice))!==null){
+            const raw = mK[1].replace(/,/g,'');
+            const val = parseFloat(raw);
+            if(!isNaN(val)) alumTotalKg = val;
+          }
+          let mP; while((mP=aluminumPricePattern.exec(slice))!==null){
+            const raw = mP[1].replace(/,/g,'');
+            const val = parseFloat(raw);
+            if(!isNaN(val)) alumPrice = val;
+          }
+          let mT; while((mT=aluminumTotalPattern.exec(slice))!==null){
+            const raw = mT[1].replace(/,/g,'');
+            const val = parseFloat(raw);
+            if(!isNaN(val)) alumTotal = val;
+          }
+          if(!isNaN(alumTotalKg) && !isNaN(alumPrice)){
+            alumCustomsUSD = alumTotalKg * alumPrice;
+          } else if(!isNaN(alumTotal)){
+            alumCustomsUSD = alumTotal;
+          }
+          const parentQty = flNorm(item.quantity);
+          if(!isNaN(alumCustomsUSD) && !isNaN(parentQty)){
+            if(alumCustomsUSD>0 && parentQty>0){
+              const parentTotal = flNorm(item.line_total);
+              if(!isNaN(parentTotal) && parentTotal>=alumCustomsUSD){
+                const parentAdjusted = parentTotal - alumCustomsUSD;
+                item.line_total = fmt2(Math.max(0,parentAdjusted));
+                alumAdd=true;
+              }else if(alumCustomsUSD>0){
+                alumAdd=true;
+              }
+            }
+          }
+        }
+
+        const steelUnit = isNaN(steelTotalKg) ? 'KG' : 'KG';
+        const alumUnit  = isNaN(alumTotalKg) ? 'KG' : 'KG';
 
         if(steelAdd>0){
           enriched.push({
@@ -416,8 +584,8 @@
             supplier: supplier,
             position: `${item.position}S`,
             part_number: `Steel - ${item.part_number}`.slice(0,64),
-            quantity: isNaN(steelWeightKG)?'':fmt2(steelWeightKG),
-            unit: 'KG',
+            quantity: isNaN(steelQty)?'':fmt2(steelQty),
+            unit: steelUnit,
             unit_price: '',
             line_total: fmt2(steelCustomsUSD),
             net_weight: '',
@@ -592,6 +760,8 @@
   }
 
   function updateCell(rowIndex, key, value){
+    saveStateToUndo(`Edit ${key}`);
+    
     const items = allData.filter(d=>d.invoice_number===currentInvoice);
     const sortedIdxMap = items
       .map((row, idx)=>({row, idx}))
@@ -670,6 +840,8 @@
   }
 
   function addRowBelow(rowIndex){
+    saveStateToUndo('Add row below');
+    
     const items = allData.filter(d=>d.invoice_number===currentInvoice);
     items.sort((a,b)=>{
       const A=_parsePos(a.position), B=_parsePos(b.position);
@@ -688,6 +860,8 @@
 
   // Restore parent total if deleting S/A subline
   function deleteRow(rowIndex){
+    saveStateToUndo('Delete row');
+    
     const items = allData.filter(d=>d.invoice_number===currentInvoice);
     items.sort((a,b)=>{
       const A=_parsePos(a.position), B=_parsePos(b.position);
@@ -718,6 +892,9 @@
 
   function addBlankRowForCurrent(){
     if(!currentInvoice){ showAlert('Select an invoice first','error'); return; }
+    
+    saveStateToUndo('Add blank row');
+    
     const items = allData.filter(d=>d.invoice_number===currentInvoice);
     const meta = items[0]||{};
     const newPos = '';
@@ -728,9 +905,15 @@
   }
 
   function updateInvoiceField(field, value){
+    saveStateToUndo(`Update ${field}`);
     allData.forEach(d=>{ if(d.invoice_number===currentInvoice){ d[field]=value; }});
   }
-  function updateInvoiceTotal(value){ updateInvoiceField('invoice_total', value); recomputeStats(); }
+  
+  function updateInvoiceTotal(value){ 
+    saveStateToUndo('Update invoice total');
+    updateInvoiceField('invoice_total', value); 
+    recomputeStats(); 
+  }
 
   function recomputeStats(){
     const items = allData.filter(d=>d.invoice_number===currentInvoice);
@@ -788,25 +971,23 @@
       if(rec.norm.includes(qNorm)) shortBoost = 0.25;
       else if(rec.cons.includes(qCons)) shortBoost = 0.18;
     }
-    const rawContains = stripDiacritics(rec.raw).toLowerCase().includes(stripDiacritics(qRaw).toLowerCase()) ? 0.2 : 0;
-    return Math.max(exact, starts, contains, dice, consDice) + shortBoost + rawContains;
+    return Math.max(exact, starts, contains, dice, consDice) + shortBoost;
   }
-  function lookupSupplierMIDFromText(userSupplierText){
-    if(!userSupplierText) return '';
-    if(!supplierMidIndex.length) return '';
-    const qRaw  = String(userSupplierText||'').trim();
-    const qNorm = normalizeSupplierName(qRaw);
-    if(!qNorm) return '';
-    let best = { score: 0, mid: '' };
-    for(const rec of supplierMidIndex){
-      const s = scoreSupplierCandidate(qNorm, qRaw, rec);
-      if(s > best.score) best = { score: s, mid: rec.mid };
-    }
-    const thresh = (qNorm.length <= 6) ? 0.38 : 0.45;
-    return best.score >= thresh ? best.mid : '';
+  function lookupSupplierMIDFromText(supplierText){
+    const query = String(supplierText || '').trim();
+    if (!query) return '';
+    if (!Array.isArray(supplierMidIndex) || supplierMidIndex.length === 0) return '';
+    const qNorm = normalizeSupplierName(query);
+    if (!qNorm) return '';
+    const candidates = supplierMidIndex.map(rec => ({
+      rec,
+      score: scoreSupplierCandidate(qNorm, query, rec)
+    })).filter(c => c.score > 0.5);
+    if (!candidates.length) return '';
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0].rec.mid;
   }
 
-  /* =================== EXPORTS =================== */
   function extractBasePartNumber(fullPartNum){
     const s = String(fullPartNum || '').trim();
     const head = s.split('.')[0];
@@ -935,6 +1116,14 @@
         supplierPartNum = subNum;
       }
 
+      // CHANGED: Calculate unit price as item total / quantity
+      let calculatedUnitPrice = '';
+      const itemTotal = parseFloatSafe(item.line_total);
+      const quantity = parseFloatSafe(item.quantity);
+      if (!isNaN(itemTotal) && !isNaN(quantity) && quantity > 0) {
+        calculatedUnitPrice = (itemTotal / quantity).toFixed(2);
+      }
+
       const supplierForInvoice = (currentUiSupplierByInvoice[item.invoice_number] || item.supplier || '');
       const row = {
         'InvoiceNumber': item.invoice_number,
@@ -947,7 +1136,7 @@
         'Quantity': item.quantity,
         'UnitOfMeasure': item.unit,
         'Description': '',
-        'UnitPrice': item.unit_price,
+        'UnitPrice': calculatedUnitPrice,  // CHANGED: Now calculated from item total / quantity
         'ItemTotal': item.line_total,
         'CurrencyCode': '',
         'ExchangeRate': '',
@@ -1149,59 +1338,59 @@
       return _origMatch.call(this, re);
     }
   };
+
+  if(RegExp.prototype.exec){
+    const _origExec = RegExp.prototype.exec;
+    Object.defineProperty(RegExp.prototype, '__origExec', { value: _origExec, configurable: true });
+    RegExp.prototype.exec = function(str){
+      try{
+        if(needNorm(this)){
+          const norm = normalizeWeirdSpacing(String(str));
+          return _origExec.call(this, norm);
+        }
+        return _origExec.call(this, str);
+      }catch(e){
+        return _origExec.call(this, str);
+      }
+    };
+  }
 })();
 </script>
 
-<!-- =================== STEEL-FIRST ORDERING (unchanged) =================== -->
+<!-- =================== AUTO-REORDERING FOR S/A SUBLINES =================== -->
 <script>
 (function(){
-  function _rowInfo(row){
-    const inv = String(row.invoice_number || '').trim();
-    const pos = String(row.position || '').trim();
-    const base = pos.replace(/[SA]$/i, '');
-    let ord = 0;
-    if (/S$/i.test(pos)) ord = 1;
-    else if (/A$/i.test(pos)) ord = 2;
-    return { group: inv + '||' + base, ord };
-  }
-
   function reorderSteelAlum(arr){
-    if (!Array.isArray(arr) || arr.length === 0) return arr;
-    const groupMap = new Map();
-    arr.forEach((r, idx) => {
-      const { group, ord } = _rowInfo(r);
-      if (!groupMap.has(group)) groupMap.set(group, []);
-      groupMap.get(group).push({ r, idx, ord });
+    if(!Array.isArray(arr) || arr.length===0) return;
+    const grouped={};
+    arr.forEach(r=>{
+      const inv=r.invoice_number||''; if(!grouped[inv]) grouped[inv]=[]; grouped[inv].push(r);
     });
-    const out = [];
-    const used = new Set();
-    arr.forEach((r, idx) => {
-      if (used.has(idx)) return;
-      const { group } = _rowInfo(r);
-      const bucket = groupMap.get(group);
-      if (!bucket) { out.push(r); return; }
-      bucket.sort((a, b) => (a.ord - b.ord) || (a.idx - b.idx));
-      bucket.forEach(({ r: row, idx: i }) => { out.push(row); used.add(i); });
-      groupMap.delete(group);
+    function numSuf(s){ return s===''?0:(s==='S'?1:2); }
+    function parsePos(p){
+      const m=String(p||'').match(/^(\d+(?:[.,]\d+)?)([A-Za-z]?)$/);
+      if(!m) return {n:999999,s:''};
+      return { n:parseFloat(String(m[1]).replace(',','.')), s:(m[2]||'').toUpperCase() };
+    }
+    Object.keys(grouped).forEach(inv=>{
+      const items=grouped[inv];
+      items.sort((a,b)=>{
+        const A=parsePos(a.position), B=parsePos(b.position);
+        if(A.n!==B.n) return A.n-B.n;
+        return numSuf(A.s)-numSuf(B.s);
+      });
     });
-    arr.length = 0;
-    Array.prototype.push.apply(arr, out);
-    return arr;
   }
 
   function detectDataArray(){
-    const candidates = [];
-    for (const k in window){
-      try{
-        const v = window[k];
-        if (Array.isArray(v) && v.length && typeof v[0] === 'object'){
-          const keys = Object.keys(v[0]);
-          if (keys.includes('invoice_number') && keys.includes('position')){
-            candidates.push({name:k, ref:v});
-          }
+    const candidates=[];
+    ['allData','invoiceData','items','rows','data','parsedData','invoices','lineItems'].forEach(name=>{
+      if(typeof window[name]!=='undefined' && Array.isArray(window[name]) && window[name].length>0){
+        const first=window[name][0]; if(first && typeof first==='object' && 'position' in first){
+          candidates.push({name, ref:window[name]});
         }
-      }catch(_){ }
-    }
+      }
+    });
     candidates.sort((a,b)=> (b.ref.length||0) - (a.ref.length||0));
     return candidates[0] || null;
   }
