@@ -612,45 +612,6 @@
       focusHint.pos = String(value || '');
     }
 
-    // Auto-lookup steel/aluminum part numbers from database when user manually adds them
-    if (key === 'part_number' && value) {
-      const valueLower = String(value).toLowerCase().trim();
-      const isSteel = /^steel$/i.test(valueLower);
-      const isAlum = /^(alum|aluminum)$/i.test(valueLower);
-      
-      if (isSteel || isAlum) {
-        // Find parent line - either by position suffix or by finding line above
-        let parentLine = null;
-        const currentPos = String(recs[realIdx].position || '');
-        
-        // First try: if position ends with S or A, find parent by base position
-        if (/[SA]$/i.test(currentPos)) {
-          const basePos = currentPos.replace(/[SA]$/i, '');
-          parentLine = recs.find(r => String(r.position||'') === basePos);
-        }
-        
-        // Second try: find the line immediately above in sorted order
-        if (!parentLine && realIdx > 0) {
-          parentLine = recs[realIdx - 1];
-        }
-        
-        // If we found a parent line, look up the correct part number
-        if (parentLine && parentLine.part_number) {
-          const parentBasePart = extractBasePartNumber(parentLine.part_number);
-          if (parentBasePart) {
-            const parentTariffs = lookupTariffs(parentBasePart);
-            // Find first non-98/99 tariff
-            const tariffForSubline = parentTariffs.find(t => !String(t).startsWith('98') && !String(t).startsWith('99')) || null;
-            
-            if (tariffForSubline) {
-              const lookedUpPartNum = getSteelAlumPartNumber(tariffForSubline, isSteel ? 'Steel' : 'Aluminum');
-              recs[realIdx].part_number = lookedUpPartNum;
-            }
-          }
-        }
-      }
-    }
-
     if (key === 'line_total') {
       const pos = String(recs[realIdx].position || '');
       if (/[SA]$/i.test(pos)) {
