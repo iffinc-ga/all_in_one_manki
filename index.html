@@ -301,34 +301,30 @@
       const overallMatches=[...sectionText.matchAll(overallPattern)];
       if(overallMatches.length) invoiceTotal = overallMatches.at(-1)[1].replace(/,/g,'');
 
-      const UNIT_WORD = '(?:carton|bucket(?:s|\\(s\\))?|pail|tin|can|barrel|canister|cartridge|bottle(?:s|\\(s\\))?|piece(?:\\(s\\))?|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|Kilogramme)';
+      const UNIT_WORD = '(?:bucket(?:s|\\(s\\))?|bottle(?:s|\\(s\\))?|canister|cartridge|piece(?:\\(s\\))?|barrel|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|carton|Kilogramme)';
 
+      // Pattern A: Part number must contain at least one period
       const linePatternA = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
+        String.raw`(\d+)\s+([A-Z0-9]*\.[A-Z0-9.\-]+)\s+` +
+        String.raw`(?:(?!(?:\d+)\s+(?:[A-Z0-9]*\.[A-Z0-9.\-]+))[\s\S]){0,300}?` +  // Skip text but stop at next position
+        String.raw`([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
         String.raw`x\s*([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
+        String.raw`(?:[\d,]+\.?\d+\s+L\s+)?` +  // Optional liter line
         String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
         String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
         String.raw`([\d,]+\.?\d+)`,
         'gi'
       );
 
+      // Pattern B: Part number must contain at least one period
       const linePatternB = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +
+        String.raw`(\d+)\s+([A-Z0-9]*\.[A-Z0-9.\-]+)\s+` +
+        String.raw`(?:(?!(?:\d+)\s+(?:[A-Z0-9]*\.[A-Z0-9.\-]+))[\s\S]){0,300}?` +
+        String.raw`([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +
+        String.raw`(?:[\d,]+\.?\d+\s+L\s+)?` +  // Optional liter line
         String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
         String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
         String.raw`([\d,]+)\.?\d*`,
-        'gi'
-      );
-
-      // New: very flexible Pattern C for "crowded" lines like POS 97 with extra L/QT segments
-      const linePatternC = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+` +              // pos, part number
-        String.raw`(?:[A-Z0-9\-\/]+\s+){0,20}` +             // product words
-        String.raw`([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +       // container qty + unit word
-        String.raw`(.*?)` +                                  // blob with extra L / QT quantities
-        String.raw`([\d.,]+)\s+USD\/` +
-        String.raw`(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` + // price unit
-        String.raw`([\d,]+\.?\d+)`,                          // line total
         'gi'
       );
 
@@ -361,7 +357,6 @@
         });
       }
 
-      // Pattern A (structured "x" + totals in same segment)
       let mA; while((mA=linePatternA.exec(sectionText))!==null){
         const position=mA[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
         pushItem({
@@ -379,7 +374,6 @@
         });
       }
 
-      // Pattern B (simpler, no explicit per-unit quantity)
       let mB; while((mB=linePatternB.exec(sectionText))!==null){
         const position=mB[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
         pushItem({
@@ -393,54 +387,6 @@
           priceUnit:mB[7]||'',
           lineTotal:(mB[8]||'').replace(/,/g,''),
           matchIndex:mB.index ?? 0
-        });
-      }
-
-      // Pattern C (fallback) — handles lines like:
-      // "97 40326.9389.3.418 ... 12.0 tin(s) x 1.000 QT 0.946 L 12.000 QT 11.352 L 14.78833 USD/QT 177.46"
-      let mC; while((mC=linePatternC.exec(sectionText))!==null){
-        const position = mC[1];
-        if (positionsFound.has(position)) continue;
-        positionsFound.add(position);
-
-        const partNumber = (mC[2]||'').slice(0,64);
-        const containerQty = (mC[3]||'').replace(/,/g,'');
-        const midChunk = mC[4] || '';
-        const unitPrice = mC[5] || '';
-        const priceUnit = (mC[6] || '').toUpperCase();
-        const lineTotal = (mC[7] || '').replace(/,/g,'');
-
-        // Try to find the most relevant quantity/unit pair before "USD/"
-        let qty = '';
-        let unit = '';
-
-        const qtyUnitMatches = [...midChunk.matchAll(/([\d,]+\.?\d*)\s+(L|KG|GAL|PT|QT|FOZ)/gi)];
-        if (qtyUnitMatches.length) {
-          // Prefer the last pair whose unit matches priceUnit (e.g. QT for USD/QT)
-          const preferred = qtyUnitMatches.filter(m => m[2].toUpperCase() === priceUnit);
-          const chosen = (preferred.length ? preferred[preferred.length-1] : qtyUnitMatches[qtyUnitMatches.length-1]);
-          qty = (chosen[1] || '').replace(/,/g,'');
-          unit = (chosen[2] || '').toUpperCase();
-        } else {
-          // Fallback: just use container quantity and priceUnit
-          qty = containerQty;
-          unit = priceUnit;
-        }
-
-        lineItems.push({
-          invoice_number: invoiceNum,
-          invoice_date: invoiceDate,
-          invoice_total: invoiceTotal,
-          supplier: supplier,
-          position,
-          part_number: partNumber,
-          quantity: qty,
-          unit: unit,
-          unit_price: unitPrice,
-          line_total: lineTotal,
-          net_weight: '',
-          country_of_origin: '',
-          _matchIndex: mC.index ?? 0
         });
       }
 
