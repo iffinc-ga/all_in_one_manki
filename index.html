@@ -301,10 +301,10 @@
       const overallMatches=[...sectionText.matchAll(overallPattern)];
       if(overallMatches.length) invoiceTotal = overallMatches.at(-1)[1].replace(/,/g,'');
 
-      const UNIT_WORD = '(?:carton|bucket(?:s|\\(s\\))?|pail|tin|can|barrel|canister|cartridge|bottle(?:s|\\(s\\))?|piece(?:\\(s\\))?|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|Kilogramme)';
+      const UNIT_WORD = '(?:bucket(?:s|\\(s\\))?|bottle(?:s|\\(s\\))?|canister|cartridge|piece(?:\\(s\\))?|barrel|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|carton|Kilogramme)';
 
       const linePatternA = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
+        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+[\s\S]*?([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
         String.raw`x\s*([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
         String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
         String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
@@ -313,7 +313,7 @@
       );
 
       const linePatternB = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +
+        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+[\s\S]*?([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +
         String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
         String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
         String.raw`([\d,]+)\.?\d*`,
@@ -379,78 +379,6 @@
           priceUnit:mB[7]||'',
           lineTotal:(mB[8]||'').replace(/,/g,''),
           matchIndex:mB.index ?? 0
-        });
-      }
-
-      /* ================================
-         PATTERN C — MULTILINE FALLBACK
-         Captures POS lines like 57, 94, 97, 12
-      ================================= */
-      const fallbackLines = sectionText.split(/\n+/);
-      for (let i = 0; i < fallbackLines.length; i++) {
-        const line = fallbackLines[i];
-
-        // Detect "POS + part number" line
-        const posMatch = line.match(/^(\d+)\s+([A-Z0-9.\-]+)\s*$/);
-        if (!posMatch) continue;
-
-        const position = posMatch[1];
-        const partNumber = posMatch[2];
-
-        if (positionsFound.has(position)) continue;
-        positionsFound.add(position);
-
-        let qty = '';
-        let unit = '';
-        let unitPrice = '';
-        let lineTotal = '';
-
-        // Look ahead a few lines to collect qty/unit/price/total
-        for (let j = 1; j <= 6 && i + j < fallbackLines.length; j++) {
-          const l2 = fallbackLines[i + j];
-
-          // e.g. "1.0 tin(s) x 0.890 QT"
-          let q1 = l2.match(/([\d.,]+)\s+(tin|can|bucket|bottle|pail|canister|barrel|carton)(?:\(s\))?\s*x\s*([\d.,]+)\s+([A-Z]+)/i);
-          if (q1) {
-            // We treat qty as the per-unit or total qty depending on pattern;
-            // for now store the "x" RHS as qty and unit
-            qty = q1[3].replace(/,/g, '');
-            unit = q1[4];
-            continue;
-          }
-
-          // e.g. "0.842 L" if we don't yet have qty
-          let q2 = l2.match(/([\d.,]+)\s+(L|KG|GAL|PT|QT|FOZ)/i);
-          if (q2 && !qty) {
-            qty = q2[1].replace(/,/g, '');
-            unit = q2[2];
-            continue;
-          }
-
-          // e.g. "36.22000 USD/TIN 36.22"
-          let price = l2.match(/([\d.,]+)\s+USD\/([A-Z]+)\s+([\d.,]+)/i);
-          if (price) {
-            unitPrice = price[1];
-            if (!unit) unit = price[2];
-            lineTotal = price[3].replace(/,/g, '');
-            break;
-          }
-        }
-
-        lineItems.push({
-          invoice_number: invoiceNum,
-          invoice_date: invoiceDate,
-          invoice_total: invoiceTotal,
-          supplier: supplier,
-          position,
-          part_number: partNumber,
-          quantity: qty,
-          unit: unit,
-          unit_price: unitPrice,
-          line_total: lineTotal,
-          net_weight: '',
-          country_of_origin: '',
-          _matchIndex: sectionText.indexOf(line)
         });
       }
 
@@ -547,7 +475,6 @@
       allData.push(...enriched);
     });
   }
-
 
   /* =================== UI RENDERING / EDITING =================== */
 
