@@ -305,7 +305,7 @@
 
       const linePatternA = new RegExp(
         String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+[\s\S]*?([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
-        String.raw`x\s*([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
+        String.raw`x\s*([\d,]+\.?\d+)\s+([A-Z]+)\s+[\s\S]*?` +
         String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
         String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
         String.raw`([\d,]+\.?\d+)`,
@@ -313,7 +313,7 @@
       );
 
       const linePatternB = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+[\s\S]*?([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +
+        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+[\s\S]*?([\d,]+\.?\d*)\s+${UNIT_WORD}\s*[\s\S]*?` +
         String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
         String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
         String.raw`([\d,]+)\.?\d*`,
