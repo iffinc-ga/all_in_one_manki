@@ -301,33 +301,34 @@
       const overallMatches=[...sectionText.matchAll(overallPattern)];
       if(overallMatches.length) invoiceTotal = overallMatches.at(-1)[1].replace(/,/g,'');
 
-      const UNIT_WORD = '(?:carton|bucket(?:s|\\(s\\))?|pail|tin|can|barrel|canister|cartridge|bottle(?:s|\\(s\\))?|piece(?:\\(s\\))?|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|Kilogramme)';
+      const UNIT_WORD = '(?:bucket(?:s|\\(s\\))?|bottle(?:s|\\(s\\))?|canister|cartridge|piece(?:\\(s\\))?|barrel|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|carton|Kilogramme)';
 
+      // Pattern A: Part number must contain at least one period, with TWO optional liter lines
       const linePatternA = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
+        String.raw`(\d+)\s+([A-Z0-9]*\.[A-Z0-9.\-]+)\s+` +
+        String.raw`(?:(?!(?:\d+)\s+(?:[A-Z0-9]*\.[A-Z0-9.\-]+))[\s\S]){0,300}?` +  // Skip text but stop at next position
+        String.raw`([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
         String.raw`x\s*([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
+        String.raw`(?:[\d,]+\.?\d+\s+L\s+)?` +  // First optional liter line
         String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
+        String.raw`(?:[\d,]+\.?\d+\s+L\s+)?` +  // Second optional liter line
         String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
         String.raw`([\d,]+\.?\d+)`,
         'gi'
       );
 
+      // Pattern B: Handles cases where "x" appears after unit word, with optional text before quantities
       const linePatternB = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +
+        String.raw`(\d+)\s+([A-Z0-9]*\.[A-Z0-9.\-]+)\s+` +
+        String.raw`(?:(?!(?:\d+)\s+(?:[A-Z0-9]*\.[A-Z0-9.\-]+))[\s\S]){0,300}?` +
+        String.raw`([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +
+        String.raw`(?:x\s+)?` +  // Optional "x" after unit word
+        String.raw`(?:(?!(?:\d+)\s+(?:[A-Z0-9]*\.[A-Z0-9.\-]+))[\s\S]){0,200}?` +  // Allow text after unit word/x
+        String.raw`(?:[\d,]+\.?\d+\s+L\s+)?` +  // First optional liter line
         String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
+        String.raw`(?:[\d,]+\.?\d+\s+L\s+)?` +  // Second optional liter line
         String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
         String.raw`([\d,]+)\.?\d*`,
-        'gi'
-      );
-
-      // Very targeted pattern for lines like POS 57 / 94 / 97 / 12,
-      // where tin(s), multiple QT/L values, and USD/QT or USD/TIN appear in one long text run.
-      const tinQtPattern = new RegExp(
-        String.raw`(\d+)\s+([A-Z0-9.\-]+)[\s\S]{0,200}?` +      // position, part number, then some text
-        String.raw`([\d,]+\.?\d*)\s+tin\(s\)\s+x\s+([\d,]+\.?\d*)\s+QT` + // container qty and per-tin QT
-        String.raw`[\s\S]{0,80}?([\d,]+\.?\d*)\s+QT` +          // total QT
-        String.raw`[\s\S]{0,80}?([\d.,]+)\s+USD\/(QT|TIN)\s+` + // price + price unit
-        String.raw`([\d,]+\.?\d+)`,                             // line total
         'gi'
       );
 
@@ -360,7 +361,6 @@
         });
       }
 
-      // Pattern A (main structured pattern)
       let mA; while((mA=linePatternA.exec(sectionText))!==null){
         const position=mA[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
         pushItem({
@@ -378,7 +378,6 @@
         });
       }
 
-      // Pattern B (simpler variant)
       let mB; while((mB=linePatternB.exec(sectionText))!==null){
         const position=mB[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
         pushItem({
@@ -392,48 +391,6 @@
           priceUnit:mB[7]||'',
           lineTotal:(mB[8]||'').replace(/,/g,''),
           matchIndex:mB.index ?? 0
-        });
-      }
-
-      // Pattern C (very narrow fallback) — only for "tin(s) x ... QT ... QT ... USD/QT or USD/TIN" lines
-      let mC; while((mC=tinQtPattern.exec(sectionText))!==null){
-        const position = mC[1];
-        if (positionsFound.has(position)) continue;
-        positionsFound.add(position);
-
-        const partNumber = (mC[2]||'').slice(0,64);
-        const containerQty = (mC[3]||'').replace(/,/g,'');
-        const perTinQtyQt = (mC[4]||'').replace(/,/g,''); // may be useful later if needed
-        const totalQt = (mC[5]||'').replace(/,/g,'');
-        const unitPrice = mC[6] || '';
-        const priceUnit = (mC[7] || '').toUpperCase();   // QT or TIN
-        const lineTotal = (mC[8] || '').replace(/,/g,'');
-
-        // Decide which quantity we expose based on price unit
-        let quantity, unit;
-        if (priceUnit === 'QT') {
-          quantity = totalQt;   // e.g. 12.000 QT
-          unit = 'QT';
-        } else {
-          // USD/TIN: treat container count as quantity in TIN
-          quantity = containerQty;
-          unit = 'TIN';
-        }
-
-        lineItems.push({
-          invoice_number: invoiceNum,
-          invoice_date: invoiceDate,
-          invoice_total: invoiceTotal,
-          supplier: supplier,
-          position,
-          part_number: partNumber,
-          quantity,
-          unit,
-          unit_price: unitPrice,
-          line_total: lineTotal,
-          net_weight: '',
-          country_of_origin: '',
-          _matchIndex: mC.index ?? 0
         });
       }
 
