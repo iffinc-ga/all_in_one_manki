@@ -301,7 +301,7 @@
       const overallMatches=[...sectionText.matchAll(overallPattern)];
       if(overallMatches.length) invoiceTotal = overallMatches.at(-1)[1].replace(/,/g,'');
 
-      const UNIT_WORD = '(?:carton|bucket(?:s|\\(s\\))?|pail|tin|can|barrel|canister|cartridge|bottle(?:s|\\(s\\))?|piece(?:\\(s\\))?|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|Kilogramme)';
+      const UNIT_WORD = '(?:bucket(?:s|\\(s\\))?|bottle(?:s|\\(s\\))?|canister|cartridge|piece(?:\\(s\\))?|barrel|can(?:\\(s\\))?|pail(?:\\(s\\))?|tin(?:\\(s\\))?|carton|Kilogramme)';
 
       const linePatternA = new RegExp(
         String.raw`(\d+)\s+([A-Z0-9.\-]+)\s+([\d,]+\.?\d*)\s+${UNIT_WORD}\s*(?:\([^)]*\)\s*)?` +
