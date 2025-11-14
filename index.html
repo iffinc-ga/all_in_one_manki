@@ -290,11 +290,27 @@
       const dateMatch = sectionText.match(/^\s*(\d{2}\/\d{2}\/\d{4})/);
       const invoiceDate = dateMatch ? dateMatch[1] : '';
 
-      const headerSlice = sectionText.substring(0,1200);
-      let supplier='';
-      const supplierPattern=/(Rüdt Industrielacke GmbH & Co\. KG|Norix Lackfabrik GmbH & Co\. KG|Finalin GmbH & Co\. KG|Mankiewicz Coatings, LLC)/i;
-      const supplierMatch = headerSlice.match(supplierPattern);
-      if(supplierMatch){ supplier = supplierMatch[1].trim(); }
+            let supplier='';
+      const supplierPattern=/(R[üu]dt Industrielacke GmbH\s*&\s*Co\.?\s*KG|Norix Lackfabrik GmbH\s*&\s*Co\.?\s*KG|Finalin GmbH\s*&\s*Co\.?\s*KG|Mankiewicz Coatings, LLC)/i;
+
+      // Prefer to detect the manufacturer in the global text so we also see the
+      // lines that appear *above* the "Customs Invoice <number>" header.
+      // We look for a manufacturer name that occurs shortly before the matching
+      // Customs Invoice line for this invoice number.
+      const supplierWithContextRe = new RegExp(
+        '(R[\\u00fcüu]dt Industrielacke GmbH\\s*&\\s*Co\\.?\\s*KG|Norix Lackfabrik GmbH\\s*&\\s*Co\\.?\\s*KG|Finalin GmbH\\s*&\\s*Co\\.?\\s*KG|Mankiewicz Coatings, LLC)[\\s\\S]{0,800}?Customs\\s+Invoice\\s+' + invoiceNum + '\\b',
+        'i'
+      );
+      let supplierMatch = (text || '').match(supplierWithContextRe);
+      if (!supplierMatch) {
+        // Fallback: look inside this invoice section (in case layout changes)
+        const headerSlice = sectionText.substring(0,1200);
+        supplierMatch = headerSlice.match(supplierPattern);
+      }
+      if (supplierMatch) {
+        supplier = supplierMatch[1].trim();
+      }
+
 
       let invoiceTotal='';
       const overallPattern=/Overall\s+amount\s+in\s+USD\s+([\d,]+\.?\d*)/gi;
@@ -329,6 +345,18 @@
         String.raw`(?:[\d,]+\.?\d+\s+L\s+)?` +  // Second optional liter line
         String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
         String.raw`([\d,]+)\.?\d*`,
+        'gi'
+      );
+
+      // Pattern C: Handles short part numbers (4-5 chars) WITHOUT periods - for invoices like 90289210
+      const linePatternC = new RegExp(
+        String.raw`(\d+)\s+([A-Z0-9]{4,5})\s+` +  // Short part number without period requirement
+        String.raw`([\d,]+\.?\d*)\s+${UNIT_WORD}\s*` +
+        String.raw`x\s*([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
+        String.raw`([\d,]+\.?\d+)\s+([A-Z]+)\s+` +
+        String.raw`(?:[\d,]+\.?\d+\s+L\s+)?` +  // Optional liter line
+        String.raw`([\d.,]+)\s+USD\/(FOZ|KG|GAL|QT|PT|CN|PC|L|CAT|TIN|BTL|BUC)\s+` +
+        String.raw`([\d,]+\.?\d+)`,
         'gi'
       );
 
@@ -394,6 +422,23 @@
         });
       }
 
+      let mC; while((mC=linePatternC.exec(sectionText))!==null){
+        const position=mC[1]; if(positionsFound.has(position)) continue; positionsFound.add(position);
+        pushItem({
+          position,
+          partNumber:(mC[2]||'').slice(0,64),
+          containerQty:(mC[3]||'').replace(/,/g,''),
+          perUnitQty:(mC[4]||'').replace(/,/g,''),
+          perUnitType:mC[5]||'',
+          totalQty:(mC[6]||'').replace(/,/g,''),
+          totalUnit:mC[7]||'',
+          unitPrice:mC[8]||'',
+          priceUnit:mC[9]||'',
+          lineTotal:(mC[10]||'').replace(/,/g,''),
+          matchIndex:mC.index ?? 0
+        });
+      }
+
       const enriched=[];
       for(let idx=0; idx<lineItems.length; idx++){
         const item=lineItems[idx];
@@ -406,7 +451,7 @@
 
         const cooMatch=itemSection.match(/Country\s+of\s+origin:\s*([^\n]+?)(?:\s|$)/i);
         if(cooMatch){ let country=(cooMatch[1]||'').trim();
-          const lc=country.toLowerCase(); if(lc.includes('germany')) country='DE'; else if(lc.includes('japan')) country='JP'; else if(lc.includes('netherlands')) country='NL'; else if(lc.includes('united')&&lc.includes('kingdom')) country='GB';
+          const lc=country.toLowerCase(); if(lc.includes('germany')) country='DE'; else if(lc.includes('italy')) country='IT'; else if(lc.includes('japan')) country='JP'; else if(lc.includes('netherlands')) country='NL'; else if(lc.includes('united')&&lc.includes('kingdom')) country='GB';
           item.country_of_origin=country; }
 
         const steelBlockMatch = itemSection.match(/9903\.81\.91\s*-\s*Steel\s*Packaging([\s\S]*?)(?:9903\.85\.08|Total\s+invoice\s+value|Country\s+of\s+origin|Net\s+product\s+value|$)/i);
